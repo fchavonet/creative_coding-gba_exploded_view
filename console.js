@@ -42,7 +42,34 @@ controls.maxDistance = 12;
 // Temporary cube.
 const geometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
 
-const material = new THREE.MeshNormalMaterial();
+const material = new THREE.MeshStandardMaterial({
+  color: 0x6250ac,
+  roughness: 0.4,
+  metalness: 0
+});
+
+// General lighting.
+const hemisphereLight = new THREE.HemisphereLight(
+  0xffffff,
+  0x91889e,
+  1.2
+);
+
+scene.add(hemisphereLight);
+
+// Main light.
+const mainLight = new THREE.DirectionalLight(0xffffff, 2.5);
+
+mainLight.position.set(-3, 5, 4);
+
+scene.add(mainLight);
+
+// Fill light.
+const fillLight = new THREE.DirectionalLight(0xb8baff, 1);
+
+fillLight.position.set(4, 1, -3);
+
+scene.add(fillLight);
 
 const cube = new THREE.Mesh(geometry, material);
 
