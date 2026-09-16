@@ -86,9 +86,109 @@ spreadSlider.addEventListener("input", updateExplosion);
 // Model loader.
 const loader = new GLTFLoader();
 
+// Keep the largest connected part of the front shell.
+function cleanShellGeometry(geometry) {
+  const positions = geometry.getAttribute("position");
+  const vertexKeys = new Map();
+  const vertexIds = [];
+  const parents = [];
+
+  // Identify vertices that share the same position.
+  for (let i = 0; i < positions.count; i++) {
+    const key = [
+      positions.getX(i).toFixed(5),
+      positions.getY(i).toFixed(5),
+      positions.getZ(i).toFixed(5)
+    ].join(",");
+
+    if (!vertexKeys.has(key)) {
+      const id = vertexKeys.size;
+
+      vertexKeys.set(key, id);
+      parents.push(id);
+    }
+
+    vertexIds.push(vertexKeys.get(key));
+  }
+
+  // Find the connected component containing a vertex.
+  function findRoot(id) {
+    while (parents[id] !== id) {
+      parents[id] = parents[parents[id]];
+      id = parents[id];
+    }
+
+    return id;
+  }
+
+  let indices = [];
+
+  if (geometry.index) {
+    indices = Array.from(geometry.index.array);
+  } else {
+    for (let i = 0; i < positions.count; i++) {
+      indices.push(i);
+    }
+  }
+
+  // Connect the three vertices of each triangle.
+  for (let i = 0; i < indices.length; i += 3) {
+    const a = findRoot(vertexIds[indices[i]]);
+    const b = findRoot(vertexIds[indices[i + 1]]);
+    const c = findRoot(vertexIds[indices[i + 2]]);
+
+    parents[b] = a;
+    parents[c] = a;
+  }
+
+  // Count triangles in each connected component.
+  const triangleCounts = new Map();
+  let largestRoot = -1;
+  let largestCount = 0;
+
+  for (let i = 0; i < indices.length; i += 3) {
+    const root = findRoot(vertexIds[indices[i]]);
+    const count = (triangleCounts.get(root) || 0) + 1;
+
+    triangleCounts.set(root, count);
+
+    if (count > largestCount) {
+      largestRoot = root;
+      largestCount = count;
+    }
+  }
+
+  // Keep only triangles belonging to the main shell.
+  const keptIndices = [];
+
+  for (let i = 0; i < indices.length; i += 3) {
+    const root = findRoot(vertexIds[indices[i]]);
+
+    if (root === largestRoot) {
+      keptIndices.push(
+        indices[i],
+        indices[i + 1],
+        indices[i + 2]
+      );
+    }
+  }
+
+  geometry.setIndex(keptIndices);
+}
+
 async function loadConsole() {
   try {
     const gltf = await loader.loadAsync("./assets/gba.glb");
+
+    // Remove disconnected fragments from both shells.
+    for (const name of ["front", "rear"]) {
+      const shell = gltf.scene.getObjectByName(name);
+
+      if (shell && shell.isMesh) {
+        shell.geometry = shell.geometry.clone();
+        cleanShellGeometry(shell.geometry);
+      }
+    }
 
     gba.add(gltf.scene);
 
