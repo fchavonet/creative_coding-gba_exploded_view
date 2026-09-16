@@ -40,15 +40,6 @@ controls.enablePan = false;
 controls.minDistance = 3;
 controls.maxDistance = 12;
 
-// Temporary cube.
-const geometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
-
-const material = new THREE.MeshStandardMaterial({
-  color: 0x6250ac,
-  roughness: 0.4,
-  metalness: 0
-});
-
 // General lighting.
 const hemisphereLight = new THREE.HemisphereLight(
   0xffffff,
@@ -115,18 +106,42 @@ async function loadConsole() {
     // Center the scaled model at the origin.
     gba.position.copy(center).multiplyScalar(-scale);
 
-    // Configure the first movable parts.
-    const explosionDistance = largestDimension * 0.2;
-
+    // Configure the model parts.
     const partSettings = [
-      {
-        name: "front",
-        offset: new THREE.Vector3(0, 0, explosionDistance)
-      },
-      {
-        name: "rear",
-        offset: new THREE.Vector3(0, 0, -explosionDistance)
-      }
+      // Shells.
+      { name: "front", offset: new THREE.Vector3(-0.55, 0.3, 5.1) },
+      { name: "rear", offset: new THREE.Vector3(0.3, 0, -3.1) },
+      { name: "cover", offset: new THREE.Vector3(0.4, -0.8, -6.2) },
+
+      // Battery compartment: follows the rear shell.
+      { name: "battery_slot_left", offset: new THREE.Vector3(0.3, 0, -3.1) },
+      { name: "battery_slot_right", offset: new THREE.Vector3(0.3, 0, -3.1) },
+
+      // Screen and lens.
+      { name: "lcd_face", offset: new THREE.Vector3(-0.2, 0.15, 3.4) },
+      { name: "lens", offset: new THREE.Vector3(-0.55, 0.3, 6.4) },
+      { name: "lens_frame", offset: new THREE.Vector3(-0.55, 0.3, 6.4) },
+
+      // Front buttons.
+      { name: "a", offset: new THREE.Vector3(1.65, 0.5, 6.2) },
+      { name: "b", offset: new THREE.Vector3(1.15, 0.25, 6.2) },
+      { name: "dpad", offset: new THREE.Vector3(-1.65, 0.35, 6.2) },
+      { name: "start_key", offset: new THREE.Vector3(-1.15, -0.7, 6) },
+      { name: "select_key", offset: new THREE.Vector3(-1.15, -0.7, 6) },
+
+      // Shoulder buttons.
+      { name: "left", offset: new THREE.Vector3(-1.5, 1.3, 1.5) },
+      { name: "right", offset: new THREE.Vector3(1.5, 1.3, 1.5) },
+
+      // Connectors and controls.
+      { name: "jack", offset: new THREE.Vector3(0.8, -1.2, -0.2) },
+      { name: "link", offset: new THREE.Vector3(0.1, 1.75, 0) },
+      { name: "volume", offset: new THREE.Vector3(1.7, -0.8, -0.1) },
+      { name: "switch", offset: new THREE.Vector3(-1.8, -0.8, 0) },
+      { name: "led", offset: new THREE.Vector3(1.15, 0.5, 5.8) },
+
+      // Imported screw meshes.
+      { name: "screws", offset: new THREE.Vector3(0.35, 0, -4.3) }
     ];
 
     for (const settings of partSettings) {
