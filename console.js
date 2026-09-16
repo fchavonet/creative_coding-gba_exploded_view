@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 // Container.
 const stage = document.getElementById("stage");
@@ -71,12 +72,39 @@ fillLight.position.set(4, 1, -3);
 
 scene.add(fillLight);
 
-const cube = new THREE.Mesh(geometry, material);
+// Model container.
+const gba = new THREE.Group();
 
-cube.rotation.x = 0.4;
-cube.rotation.y = 0.6;
+scene.add(gba);
 
-scene.add(cube);
+// Model loader.
+const loader = new GLTFLoader();
+
+async function loadConsole() {
+  try {
+    const gltf = await loader.loadAsync("./assets/gba.glb");
+
+    gba.add(gltf.scene);
+
+    // Measure the model.
+    const bounds = new THREE.Box3().setFromObject(gba);
+    const size = bounds.getSize(new THREE.Vector3());
+    const center = bounds.getCenter(new THREE.Vector3());
+
+    // Fit the model to our current view.
+    const largestDimension = Math.max(size.x, size.y, size.z);
+    const scale = 3 / largestDimension;
+
+    gba.scale.setScalar(scale);
+
+    // Center the scaled model at the origin.
+    gba.position.copy(center).multiplyScalar(-scale);
+  } catch (error) {
+    console.error("Failed to load the GBA model:", error);
+  }
+}
+
+loadConsole();
 
 // Keep the scene proportional when resizing.
 function resizeScene() {
