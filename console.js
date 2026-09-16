@@ -77,6 +77,21 @@ const gba = new THREE.Group();
 
 scene.add(gba);
 
+// Exploded view.
+const spreadSlider = document.getElementById("spread");
+const movableParts = [];
+
+function updateExplosion() {
+  const progress = Number(spreadSlider.value) / 100;
+
+  for (const part of movableParts) {
+    part.object.position.copy(part.initialPosition);
+    part.object.position.addScaledVector(part.offset, progress);
+  }
+}
+
+spreadSlider.addEventListener("input", updateExplosion);
+
 // Model loader.
 const loader = new GLTFLoader();
 
@@ -99,6 +114,37 @@ async function loadConsole() {
 
     // Center the scaled model at the origin.
     gba.position.copy(center).multiplyScalar(-scale);
+
+    // Configure the first movable parts.
+    const explosionDistance = largestDimension * 0.2;
+
+    const partSettings = [
+      {
+        name: "front",
+        offset: new THREE.Vector3(0, 0, explosionDistance)
+      },
+      {
+        name: "rear",
+        offset: new THREE.Vector3(0, 0, -explosionDistance)
+      }
+    ];
+
+    for (const settings of partSettings) {
+      const object = gltf.scene.getObjectByName(settings.name);
+
+      if (!object) {
+        console.warn("Missing model part:", settings.name);
+        continue;
+      }
+
+      movableParts.push({
+        object: object,
+        initialPosition: object.position.clone(),
+        offset: settings.offset
+      });
+    }
+
+    updateExplosion();
   } catch (error) {
     console.error("Failed to load the GBA model:", error);
   }
