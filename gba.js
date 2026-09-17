@@ -86,7 +86,6 @@ const gba = new THREE.Group();
 scene.add(gba);
 
 // Exploded view.
-// Exploded view.
 const spreadSlider = document.getElementById("spread");
 const movableParts = [];
 
@@ -393,6 +392,10 @@ async function loadConsole() {
 
     gltf.scene.add(createScrews());
 
+    // Add the circuit board in the model's coordinate system.
+    const circuitBoard = await createCircuitBoard();
+    gltf.scene.add(circuitBoard);
+
     gba.add(gltf.scene);
 
     // Restore a silver finish on the battery contacts.
@@ -534,6 +537,310 @@ function configureScreenLens(model) {
       side: THREE.DoubleSide
     });
   }
+}
+
+// Convert PCB image coordinates to model coordinates.
+function pcbPoint(u, v) {
+  return new THREE.Vector2(
+    (u - 1000) * 0.00518,
+    (580 - v) * 0.00518 + 0.02
+  );
+}
+
+// Build a chip package with metallic pins.
+function createChip(width, height, horizontalPins, verticalPins) {
+  const chip = new THREE.Group();
+
+  const bodyMaterial = new THREE.MeshStandardMaterial({
+    color: 0x171b24,
+    metalness: 0,
+    roughness: 0.5
+  });
+
+  const pinMaterial = new THREE.MeshStandardMaterial({
+    color: 0xbfc3c7,
+    metalness: 1,
+    roughness: 0.25
+  });
+
+  // Add a box using coordinates relative to the chip.
+  function addBox(w, h, depth, material, x, y, z) {
+    const geometry = new THREE.BoxGeometry(w, h, depth);
+    const mesh = new THREE.Mesh(geometry, material);
+
+    mesh.position.set(x, y, z);
+    chip.add(mesh);
+  }
+
+  // Main package, raised above the board.
+  addBox(
+    width, height, 0.105,
+    bodyMaterial,
+    0, 0, 0.075
+  );
+
+  const horizontalPitch = width / (horizontalPins + 1);
+  const verticalPitch = height / (verticalPins + 1);
+
+  for (const sign of [-1, 1]) {
+    // Pins along the top and bottom edges.
+    for (let i = 0; i < horizontalPins; i++) {
+      const x = -width / 2 + (i + 1) * horizontalPitch;
+
+      // Flat contact near the board.
+      addBox(
+        0.014, 0.11, 0.016,
+        pinMaterial,
+        x, sign * (height / 2 + 0.055), 0.009
+      );
+
+      // Raised section connecting to the package.
+      addBox(
+        0.014, 0.035, 0.057,
+        pinMaterial,
+        x, sign * (height / 2 + 0.01), 0.04
+      );
+    }
+
+    // Pins along the left and right edges.
+    for (let i = 0; i < verticalPins; i++) {
+      const y = -height / 2 + (i + 1) * verticalPitch;
+
+      addBox(
+        0.11, 0.014, 0.016,
+        pinMaterial,
+        sign * (width / 2 + 0.055), y, 0.009
+      );
+
+      addBox(
+        0.035, 0.014, 0.057,
+        pinMaterial,
+        sign * (width / 2 + 0.01), y, 0.04
+      );
+    }
+  }
+
+  return chip;
+}
+
+// Build the textured circuit board and its main chips.
+async function createCircuitBoard() {
+  const board = new THREE.Group();
+  board.name = "pcb";
+  board.position.z = -0.02;
+
+  // Outline points measured on the reference image.
+  const outline = [
+    [81, 884], [130, 877], [134, 753], [104, 750],
+    [92, 598], [79, 559], [79, 481], [101, 423],
+    [105, 389], [144, 383], [148, 358], [121, 347],
+    [120, 294], [158, 246], [293, 220], [298, 192],
+    [367, 192], [389, 212], [435, 214], [482, 91],
+    [502, 80], [558, 80], [561, 120], [610, 122],
+    [615, 144], [656, 145], [659, 122], [707, 121],
+    [711, 91], [1218, 91], [1224, 145], [1260, 145],
+    [1266, 92], [1303, 93], [1307, 127], [1452, 128],
+    [1457, 81], [1518, 82], [1536, 97], [1574, 210],
+    [1615, 211], [1643, 195], [1716, 195], [1720, 218],
+    [1855, 246], [1886, 272], [1900, 299], [1900, 350],
+    [1917, 357], [1918, 422], [1930, 457], [1935, 494],
+    [1916, 548], [1916, 756], [1936, 762], [1937, 907],
+    [1924, 934], [1890, 944], [1883, 971], [1858, 980],
+    [1850, 1000], [1560, 1080], [1510, 1104], [1459, 1104],
+    [1458, 905], [1471, 880], [1470, 685], [1460, 649],
+    [1150, 650], [1135, 662], [925, 662], [912, 649],
+    [594, 648], [575, 663], [573, 705], [615, 718],
+    [616, 753], [638, 771], [638, 820], [617, 834],
+    [612, 862], [585, 874], [572, 895], [569, 997],
+    [558, 1002], [558, 1054], [516, 1057], [406, 1028],
+    [407, 990], [279, 951], [265, 985], [105, 941],
+    [81, 919]
+  ];
+
+  const shape = new THREE.Shape();
+
+  for (let i = 0; i < outline.length; i++) {
+    const [u, v] = outline[i];
+    const point = pcbPoint(u, v);
+
+    if (i === 0) {
+      shape.moveTo(point.x, point.y);
+    } else {
+      shape.lineTo(point.x, point.y);
+    }
+  }
+
+  shape.closePath();
+
+  // Hole center U, V and radius, in image pixels.
+  const holes = [
+    [510, 106, 17],
+    [1505, 105, 17],
+    [365, 302, 17],
+    [1649, 302, 17],
+    [1704, 423, 22],
+    [399, 689, 16],
+    [135, 698, 16],
+    [333, 852, 16],
+    [113, 910, 15],
+    [1876, 644, 16],
+    [1905, 909, 16],
+    [1550, 960, 15],
+    [1580, 1024, 15],
+    [1775, 579, 14]
+  ];
+
+  for (const [u, v, radius] of holes) {
+    const point = pcbPoint(u, v);
+    const hole = new THREE.Path();
+
+    hole.absarc(
+      point.x,
+      point.y,
+      radius * 0.00518,
+      0,
+      Math.PI * 2,
+      true
+    );
+
+    shape.holes.push(hole);
+  }
+
+  // Extrude the outline and center its thickness around Z = 0.
+  const thickness = 0.07;
+
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: thickness,
+    bevelEnabled: false,
+    curveSegments: 16
+  });
+
+  geometry.translate(0, 0, -thickness / 2);
+
+  const material = new THREE.MeshStandardMaterial({
+    color: 0x506b4c,
+    metalness: 0,
+    roughness: 0.74
+  });
+
+  const substrate = new THREE.Mesh(geometry, material);
+  substrate.name = "pcb_substrate";
+
+  board.add(substrate);
+
+  // Load and align the front and back textures.
+  const textureLoader = new THREE.TextureLoader();
+
+  const imageWidth = 2000;
+  const imageHeight = 1163;
+
+  for (const face of ["front", "back"]) {
+    const texture = await textureLoader.loadAsync(
+      `./assets/pcb-${face}.png`
+    );
+
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+    // Reuse the outline and its holes for each flat surface.
+    const faceGeometry = new THREE.ShapeGeometry(shape, 16);
+    const positions = faceGeometry.getAttribute("position");
+    const uv = faceGeometry.getAttribute("uv");
+
+    for (let i = 0; i < positions.count; i++) {
+      // Convert model coordinates back to image coordinates.
+      let u = positions.getX(i) / 0.00518 + 1000;
+      let v = 580 - (positions.getY(i) - 0.02) / 0.00518;
+
+      // Mirror and align the back reference image.
+      if (face === "back") {
+        u = imageWidth + 6 - u;
+        v -= 10;
+      }
+
+      uv.setXY(
+        i,
+        u / imageWidth,
+        1 - v / imageHeight
+      );
+    }
+
+    uv.needsUpdate = true;
+
+    let side = THREE.FrontSide;
+    let positionZ = thickness / 2 + 0.001;
+
+    if (face === "back") {
+      side = THREE.BackSide;
+      positionZ = -thickness / 2 - 0.001;
+    }
+
+    const faceMaterial = new THREE.MeshStandardMaterial({
+      map: texture,
+      metalness: 0,
+      roughness: 0.72,
+      side: side
+    });
+
+    const surface = new THREE.Mesh(faceGeometry, faceMaterial);
+    surface.name = `pcb_${face}`;
+    surface.position.z = positionZ;
+
+    board.add(surface);
+  }
+
+  // Main chips, positioned using the reference image.
+  const chipSettings = [
+    {
+      name: "cpu",
+      u: 975,
+      v: 352,
+      width: 1.41,
+      height: 0.98,
+      horizontalPins: 38,
+      verticalPins: 26,
+      offset: new THREE.Vector3(-0.45, 0.5, 2.2)
+    },
+    {
+      name: "ram",
+      u: 1332,
+      v: 285,
+      width: 0.83,
+      height: 0.94,
+      horizontalPins: 0,
+      verticalPins: 24,
+      offset: new THREE.Vector3(0.5, 0.8, 1.9)
+    }
+  ];
+
+  for (const settings of chipSettings) {
+    const chip = createChip(
+      settings.width,
+      settings.height,
+      settings.horizontalPins,
+      settings.verticalPins
+    );
+
+    const point = pcbPoint(settings.u, settings.v);
+
+    chip.name = settings.name;
+    chip.position.set(
+      point.x,
+      point.y,
+      thickness / 2 + 0.002
+    );
+
+    board.add(chip);
+
+    // Register the chip with the existing explosion animation.
+    movableParts.push({
+      object: chip,
+      initialPosition: chip.position.clone(),
+      offset: settings.offset
+    });
+  }
+
+  return board;
 }
 
 loadConsole();

@@ -38,12 +38,8 @@
         <!-- TOP CONTAINER -->
         <div class="fixed top-0 left-0 w-full h-auto p-4 flex flex-row justify-between items-center z-2">
             <!-- EXPLODED VIEW CONTROL -->
-            <div class="w-72">
-                <input id="spread" class="range range-xs [--range-thumb-size:12px] [--range-p:2px] [--radius-selector:0px] w-full " type="range" min="0" max="100" value="0">
-                <div class="mt-2 flex justify-between text-xs">
-                    <span>Assembled</span>
-                    <span>Exploded</span>
-                </div>
+            <div class="tooltip tooltip-bottom w-72" data-tip="Swipe to explode or reassemble the GBA">
+                <input id="spread" class="range range-xs [--range-thumb-size:12px] [--range-p:2px] [--radius-selector:0px] w-full" type="range" min="0" max="100" value="0">
             </div>
 
             <!-- Toggle mode button -->
