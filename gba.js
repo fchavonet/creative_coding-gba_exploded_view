@@ -86,19 +86,43 @@ const gba = new THREE.Group();
 scene.add(gba);
 
 // Exploded view.
+// Exploded view.
 const spreadSlider = document.getElementById("spread");
 const movableParts = [];
 
-function updateExplosion() {
-  const progress = Number(spreadSlider.value) / 100;
+let explosionProgress = 0;
+let explosionTarget = 0;
 
-  for (const part of movableParts) {
-    part.object.position.copy(part.initialPosition);
-    part.object.position.addScaledVector(part.offset, progress);
-  }
+const explosionSpeed = 8;
+
+// Read the target position from the slider.
+function updateExplosion() {
+  explosionTarget = Number(spreadSlider.value) / 100;
 }
 
 spreadSlider.addEventListener("input", updateExplosion);
+
+// Smoothly move the parts toward the target.
+function animateExplosion(deltaTime) {
+  const smoothing = 1 - Math.exp(-explosionSpeed * deltaTime);
+
+  explosionProgress += (
+    explosionTarget - explosionProgress
+  ) * smoothing;
+
+  // Reach the exact target when the remaining difference is tiny.
+  if (Math.abs(explosionTarget - explosionProgress) < 0.0001) {
+    explosionProgress = explosionTarget;
+  }
+
+  for (const part of movableParts) {
+    part.object.position.copy(part.initialPosition);
+    part.object.position.addScaledVector(
+      part.offset,
+      explosionProgress
+    );
+  }
+}
 
 // Model loader.
 const loader = new GLTFLoader();
@@ -529,7 +553,20 @@ function resizeScene() {
 window.addEventListener("resize", resizeScene);
 
 // Animation loop.
+let previousTime = performance.now();
+
 function animate() {
+  const currentTime = performance.now();
+
+  // Elapsed time in seconds, capped to avoid jumps after a pause.
+  const deltaTime = Math.min(
+    (currentTime - previousTime) / 1000,
+    0.05
+  );
+
+  previousTime = currentTime;
+
+  animateExplosion(deltaTime);
   controls.update();
   renderer.render(scene, camera);
 }
