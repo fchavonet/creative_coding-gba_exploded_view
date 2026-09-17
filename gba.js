@@ -1023,6 +1023,185 @@ function createInductor() {
   return inductor;
 }
 
+// Build the LCD ribbon socket, locking bar and 32 contacts.
+function createLcdSocket() {
+  const socket = new THREE.Group();
+  socket.name = "lcd_socket";
+
+  const housingMaterial = new THREE.MeshStandardMaterial({
+    color: 0xe3d7b5,
+    metalness: 0,
+    roughness: 0.6
+  });
+
+  const latchMaterial = new THREE.MeshStandardMaterial({
+    color: 0x20232a,
+    metalness: 0,
+    roughness: 0.55
+  });
+
+  const contactMaterial = new THREE.MeshStandardMaterial({
+    color: 0xc6a45c,
+    metalness: 1,
+    roughness: 0.3
+  });
+
+  const mountingMaterial = new THREE.MeshStandardMaterial({
+    color: 0xbfc3c7,
+    metalness: 1,
+    roughness: 0.3
+  });
+
+  // Add a rectangular part in the socket's local coordinates.
+  function addBox(width, height, depth, material, x, y, z) {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(width, height, depth),
+      material
+    );
+
+    mesh.position.set(x, y, z);
+    socket.add(mesh);
+  }
+
+  // Ivory plastic housing.
+  addBox(
+    1.43, 0.31, 0.17,
+    housingMaterial,
+    0, 0, 0.11
+  );
+
+  // Dark locking bar along the ribbon entry.
+  addBox(
+    1.3, 0.06, 0.08,
+    latchMaterial,
+    0, 0.16, 0.2
+  );
+
+  // Exposed contact tails along the opposite edge.
+  for (let i = 0; i < 32; i++) {
+    addBox(
+      0.014, 0.11, 0.025,
+      contactMaterial,
+      -0.62 + i * 0.04, -0.2, 0.022
+    );
+  }
+
+  // Metal mounting tabs at both ends.
+  for (const x of [-0.75, 0.75]) {
+    addBox(
+      0.09, 0.29, 0.05,
+      mountingMaterial,
+      x, 0, 0.035
+    );
+  }
+
+  return socket;
+}
+
+// Build the curved LCD ribbon using the calibrated socket position.
+function createLcdRibbon(socket) {
+  const ribbon = new THREE.Group();
+  ribbon.name = "lcd_ribbon";
+
+  const x = socket.position.x;
+
+  // Keep the front section behind the LCD and retain the socket connection.
+  const curve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(x, 1.75, 0.20),
+    new THREE.Vector3(x, socket.position.y + 0.48, 0.20),
+    new THREE.Vector3(x, socket.position.y + 0.48, -0.14),
+    new THREE.Vector3(
+      x,
+      socket.position.y + 0.155,
+      socket.position.z - 0.12
+    )
+  ]);
+
+  const segments = 48;
+  const halfWidth = 0.61;
+  const vertices = [];
+  const indices = [];
+
+  // Create two vertices across the ribbon at each curve sample.
+  for (let i = 0; i <= segments; i++) {
+    const point = curve.getPoint(i / segments);
+
+    vertices.push(
+      point.x - halfWidth, point.y, point.z,
+      point.x + halfWidth, point.y, point.z
+    );
+
+    if (i < segments) {
+      const index = i * 2;
+
+      indices.push(
+        index, index + 1, index + 2,
+        index + 1, index + 3, index + 2
+      );
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(vertices, 3)
+  );
+
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+
+  const ribbonMaterial = new THREE.MeshStandardMaterial({
+    color: 0xb96520,
+    metalness: 0,
+    roughness: 0.45,
+    side: THREE.DoubleSide
+  });
+
+  ribbon.add(new THREE.Mesh(geometry, ribbonMaterial));
+
+  const trackMaterial = new THREE.MeshStandardMaterial({
+    color: 0xc6a45c,
+    metalness: 1,
+    roughness: 0.35
+  });
+
+  // Follow the ribbon surface with 32 slightly raised tracks.
+  for (let track = 0; track < 32; track++) {
+    const points = [];
+    const offsetX = -0.58 + track * (1.16 / 31);
+
+    for (let i = 0; i <= segments; i++) {
+      const progress = i / segments;
+      const point = curve.getPoint(progress);
+      const tangent = curve.getTangent(progress);
+
+      const normal = new THREE.Vector3(
+        0,
+        -tangent.z,
+        tangent.y
+      ).normalize();
+
+      point.x += offsetX;
+      point.addScaledVector(normal, 0.005);
+
+      points.push(point);
+    }
+
+    const trackGeometry = new THREE.TubeGeometry(
+      new THREE.CatmullRomCurve3(points),
+      segments,
+      0.003,
+      4,
+      false
+    );
+
+    ribbon.add(new THREE.Mesh(trackGeometry, trackMaterial));
+  }
+
+  return ribbon;
+}
+
 // Fit the circuit board to the six fixed screw axes.
 function alignCircuitBoard(board) {
   function alignPoint(point) {
@@ -1491,8 +1670,39 @@ async function createCircuitBoard() {
     offset: new THREE.Vector3(0.35, -1.1, -2.1)
   });
 
+  // Position the LCD socket on the back reference image.
+  const lcdSocket = createLcdSocket();
+  const lcdSocketPoint = pcbPoint(2006 - 1164, 157 + 10);
+
+  lcdSocket.position.set(
+    lcdSocketPoint.x,
+    lcdSocketPoint.y,
+    -thickness / 2 - 0.002
+  );
+
+  lcdSocket.rotation.y = Math.PI;
+  board.add(lcdSocket);
+
+  // Register its movement before calibrating the board.
+  movableParts.push({
+    object: lcdSocket,
+    initialPosition: lcdSocket.position.clone(),
+    offset: new THREE.Vector3(-0.2, 1.35, -1.2)
+  });
+
   // Align the completed board, including its components and markings.
   alignCircuitBoard(board);
+
+  // Build the ribbon after calibration to use the socket's final position.
+  const lcdRibbon = createLcdRibbon(lcdSocket);
+
+  board.add(lcdRibbon);
+
+  movableParts.push({
+    object: lcdRibbon,
+    initialPosition: lcdRibbon.position.clone(),
+    offset: new THREE.Vector3(0.35, 1, 2.55)
+  });
 
   return board;
 }
