@@ -89,6 +89,9 @@ scene.add(gba);
 const spreadSlider = document.getElementById("spread");
 const movableParts = [];
 
+// Shared displacement for the small components on the rear PCB face.
+const rearComponentsOffset = new THREE.Vector3(0, 0.35, -0.65);
+
 let explosionProgress = 0;
 let explosionTarget = 0;
 
@@ -1468,6 +1471,274 @@ function alignCircuitBoard(board) {
   board.updateWorldMatrix(true, true);
 }
 
+// Build a three-terminal package matching its PCB pad spacing.
+function createThreePinPackage(spanX, spanY) {
+  const component = new THREE.Group();
+
+  const bodyMaterial = new THREE.MeshStandardMaterial({
+    color: 0x202326,
+    metalness: 0,
+    roughness: 0.65
+  });
+
+  const terminalMaterial = new THREE.MeshStandardMaterial({
+    color: 0xbfc3c7,
+    metalness: 0.85,
+    roughness: 0.35
+  });
+
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(
+      spanX * 0.6,
+      spanY + 0.055,
+      0.065
+    ),
+    bodyMaterial
+  );
+
+  body.position.z = 0.0475;
+  component.add(body);
+
+  // One terminal on the left, two on the right.
+  const terminalPositions = [
+    [-spanX / 2, 0],
+    [spanX / 2, -spanY / 2],
+    [spanX / 2, spanY / 2]
+  ];
+
+  for (const [x, y] of terminalPositions) {
+    const terminal = new THREE.Mesh(
+      new THREE.BoxGeometry(
+        spanX * 0.5,
+        0.04,
+        0.025
+      ),
+      terminalMaterial
+    );
+
+    terminal.position.set(x, y, 0.0175);
+    component.add(terminal);
+  }
+
+  return component;
+}
+
+// Build a small filter package with three terminals on each side.
+function createPcbFilter() {
+  const filter = new THREE.Group();
+
+  const bodyMaterial = new THREE.MeshStandardMaterial({
+    color: 0x202326,
+    metalness: 0,
+    roughness: 0.68
+  });
+
+  const terminalMaterial = new THREE.MeshStandardMaterial({
+    color: 0xbfc3c7,
+    metalness: 0.85,
+    roughness: 0.32
+  });
+
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(0.29, 0.34, 0.10),
+    bodyMaterial
+  );
+
+  body.position.z = 0.06;
+  filter.add(body);
+
+  // Three metal terminals on each side of the package.
+  for (const sign of [-1, 1]) {
+    for (let i = 0; i < 3; i++) {
+      const terminal = new THREE.Mesh(
+        new THREE.BoxGeometry(0.10, 0.055, 0.045),
+        terminalMaterial
+      );
+
+      terminal.position.set(
+        sign * 0.16,
+        (i - 1) * 0.115,
+        0.0275
+      );
+
+      filter.add(terminal);
+    }
+  }
+
+  return filter;
+}
+
+// Add surface-mounted components around the audio amplifier.
+function addPcbSurfaceComponents(board, thickness) {
+  const resistorMaterial = new THREE.MeshStandardMaterial({
+    color: 0x252729,
+    metalness: 0,
+    roughness: 0.72
+  });
+
+  const ceramicMaterial = new THREE.MeshStandardMaterial({
+    color: 0x9c8870,
+    metalness: 0,
+    roughness: 0.8
+  });
+
+  const terminalMaterial = new THREE.MeshStandardMaterial({
+    color: 0xbfc3c7,
+    metalness: 0.85,
+    roughness: 0.35
+  });
+
+  // Pixel coordinates on the back PCB texture.
+  // Angle describes the component orientation in that image.
+  const settings = [
+    { name: "R7", u: 231, v: 648, type: "resistor", angle: 0 },
+    { name: "C48", u: 231, v: 666, type: "capacitor", angle: 0 },
+    { name: "R8", u: 231, v: 683, type: "resistor", angle: 0 },
+    { name: "C49", u: 231, v: 701, type: "capacitor", angle: 0 },
+
+    { name: "C45", u: 421, v: 674, type: "capacitor", angle: 0 },
+    { name: "C46", u: 421, v: 692, type: "capacitor", angle: 0 },
+    { name: "C47", u: 421, v: 708, type: "capacitor", angle: 0 },
+
+    { name: "C38", u: 410, v: 609, type: "capacitor", angle: 90 },
+    { name: "C39", u: 282, v: 573, type: "capacitor", angle: 90 },
+
+    // Small components above the audio amplifier.
+    { name: "R30", u: 391, v: 460, type: "resistor", angle: 0 },
+    { name: "R31", u: 391, v: 480, type: "resistor", angle: 0 },
+
+    // Components near the left shoulder switch.
+    { name: "R43", u: 224, v: 352, type: "resistor", angle: 0 },
+    { name: "C63", u: 260, v: 352, type: "capacitor", angle: 0 },
+    { name: "R26", u: 438, v: 340, type: "resistor", angle: 90 },
+    { name: "R18", u: 462, v: 340, type: "resistor", angle: 90 },
+    { name: "R25", u: 418, v: 241, type: "resistor", angle: 0 },
+    { name: "R10", u: 450, v: 239, type: "resistor", angle: 90 },
+
+    // Components around the upper filter footprints.
+    { name: "C20", u: 618, v: 219, type: "capacitor", angle: 0 },
+    { name: "R35", u: 620, v: 260, type: "resistor", angle: 0 },
+    { name: "C19", u: 813, v: 251, type: "capacitor", angle: 0 },
+    { name: "C18", u: 850, v: 251, type: "capacitor", angle: 0 },
+
+    // Components below the LCD connector.
+    { name: "C14", u: 1064, v: 229, type: "capacitor", angle: 0 },
+    { name: "C13", u: 1262, v: 229, type: "capacitor", angle: 0 },
+
+    // Components near the right shoulder switch.
+    { name: "C64", u: 1662, v: 220, type: "capacitor", angle: 0 },
+    { name: "R44", u: 1696, v: 233, type: "resistor", angle: 0 },
+    { name: "C25", u: 1710, v: 314, type: "capacitor", angle: 90 },
+
+    // Components beside the power management chip.
+    { name: "C22", u: 1838, v: 357, type: "capacitor", angle: 0 },
+    { name: "C23", u: 1838, v: 380, type: "capacitor", angle: 0 },
+    { name: "C24", u: 1841, v: 405, type: "capacitor", angle: 0 },
+    { name: "C30", u: 1596, v: 418, type: "capacitor", angle: 0 },
+
+    // Components near the electrolytic capacitors.
+    { name: "C36", u: 1851, v: 534, type: "capacitor", angle: 90 },
+    { name: "C35", u: 1855, v: 620, type: "capacitor", angle: 90 },
+    { name: "R12", u: 1808, v: 593, type: "resistor", angle: 0 },
+
+    // Small components around the power transistors.
+    { name: "R29", u: 1540, v: 448, type: "resistor", angle: 0 },
+    { name: "C61", u: 1540, v: 470, type: "capacitor", angle: 90 },
+    { name: "R11", u: 1667, v: 457, type: "resistor", angle: 0 },
+    { name: "R33", u: 1800, v: 428, type: "resistor", angle: 0 },
+    { name: "R16", u: 1682, v: 578, type: "resistor", angle: 90 },
+
+    // Larger ceramic capacitors.
+    { name: "C56", u: 1647, v: 530, type: "capacitor", angle: 90, length: 0.21, width: 0.085 },
+    { name: "C44", u: 1545, v: 659, type: "capacitor", angle: 0, length: 0.20, width: 0.09 },
+    { name: "C43", u: 1675, v: 789, type: "capacitor", angle: 90, length: 0.20, width: 0.085 },
+
+    // Components beside the lower electrolytic capacitors.
+    { name: "C41", u: 1812, v: 691, type: "capacitor", angle: 90 },
+    { name: "C40", u: 1831, v: 691, type: "capacitor", angle: 90 },
+
+    // Resistor near the power switch.
+    { name: "R13", u: 1796, v: 915, type: "resistor", angle: 90 }
+  ];
+
+  for (const settingsItem of settings) {
+    const component = new THREE.Group();
+
+    component.name = `pcb_${settingsItem.name}`;
+
+    const length = settingsItem.length ?? 0.105;
+    const width = settingsItem.width ?? 0.052;
+    const terminalLength = length * 0.24;
+
+    let height = 0.045;
+    let bodyMaterial = ceramicMaterial;
+
+    if (settingsItem.type === "resistor") {
+      height = 0.028;
+      bodyMaterial = resistorMaterial;
+    }
+
+    // Central ceramic or resistive body.
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(
+        length - terminalLength * 2,
+        width,
+        height
+      ),
+      bodyMaterial
+    );
+
+    body.position.z = height / 2;
+    component.add(body);
+
+    // Metallic terminals at both ends.
+    for (const sign of [-1, 1]) {
+      const terminal = new THREE.Mesh(
+        new THREE.BoxGeometry(
+          terminalLength,
+          width + 0.004,
+          height + 0.004
+        ),
+        terminalMaterial
+      );
+
+      terminal.position.set(
+        sign * (length - terminalLength) / 2,
+        0,
+        height / 2
+      );
+
+      component.add(terminal);
+    }
+
+    const point = pcbPoint(
+      2006 - settingsItem.u,
+      settingsItem.v + 10
+    );
+
+    component.position.set(
+      point.x,
+      point.y,
+      -thickness / 2 - 0.004
+    );
+
+    // Face outward from the back of the board.
+    component.rotation.y = Math.PI;
+    component.rotation.z = THREE.MathUtils.degToRad(
+      -settingsItem.angle
+    );
+
+    board.add(component);
+
+    // Keep the component layout together during the explosion.
+    movableParts.push({
+      object: component,
+      initialPosition: component.position.clone(),
+      offset: rearComponentsOffset.clone()
+    });
+  }
+}
+
 // Build the textured circuit board and its main chips.
 async function createCircuitBoard() {
   const board = new THREE.Group();
@@ -1922,6 +2193,143 @@ async function createCircuitBoard() {
     initialPosition: cartridgeSocket.position.clone(),
     offset: new THREE.Vector3(0, 1.6, -1.55)
   });
+
+  // Filters positioned on the back PCB texture.
+  const filterSettings = [
+    { name: "EM2", u: 680, v: 197 },
+    { name: "EM1", u: 837, v: 204 }
+  ];
+
+  for (const settings of filterSettings) {
+    const filter = createPcbFilter();
+
+    filter.name = `pcb_${settings.name}`;
+
+    const point = pcbPoint(
+      2006 - settings.u,
+      settings.v + 10
+    );
+
+    filter.position.set(
+      point.x,
+      point.y,
+      -thickness / 2 - 0.004
+    );
+
+    filter.rotation.y = Math.PI;
+
+    board.add(filter);
+
+    movableParts.push({
+      object: filter,
+      initialPosition: filter.position.clone(),
+      offset: rearComponentsOffset.clone()
+    });
+  }
+
+  // Three-terminal packages on the back PCB texture.
+  const threePinSettings = [
+    {
+      name: "Q2",
+      u: 1125,
+      v: 238,
+      spanX: 0.16,
+      spanY: 0.11,
+      angle: 0
+    },
+    {
+      name: "Q5",
+      u: 1624,
+      v: 750,
+      spanX: 0.135,
+      spanY: 0.13,
+      angle: 0
+    },
+    {
+      name: "Q6",
+      u: 1637,
+      v: 482,
+      spanX: 0.186,
+      spanY: 0.13,
+      angle: 180
+    },
+
+    // Package near the right shoulder switch.
+    {
+      name: "Q1",
+      u: 1547,
+      v: 256,
+      spanX: 0.166,
+      spanY: 0.11,
+      angle: 0
+    },
+
+    // Package below the power management chip.
+    {
+      name: "Q12",
+      u: 1838,
+      v: 444,
+      spanX: 0.166,
+      spanY: 0.104,
+      angle: 0
+    },
+
+    // Package beside the lower electrolytic capacitor.
+    {
+      name: "Q4",
+      u: 1826,
+      v: 857,
+      spanX: 0.186,
+      spanY: 0.14,
+      angle: 90
+    },
+
+    // Three-terminal diode package above C43.
+    {
+      name: "D2",
+      u: 1699,
+      v: 738,
+      spanX: 0.176,
+      spanY: 0.145,
+      angle: 0
+    }
+  ];
+
+  for (const settings of threePinSettings) {
+    const component = createThreePinPackage(
+      settings.spanX,
+      settings.spanY
+    );
+
+    component.name = `pcb_${settings.name}`;
+
+    const point = pcbPoint(
+      2006 - settings.u,
+      settings.v + 10
+    );
+
+    component.position.set(
+      point.x,
+      point.y,
+      -thickness / 2 - 0.004
+    );
+
+    component.rotation.y = Math.PI;
+    component.rotation.z = THREE.MathUtils.degToRad(
+      -settings.angle
+    );
+
+    board.add(component);
+
+    movableParts.push({
+      object: component,
+      initialPosition: component.position.clone(),
+      offset: rearComponentsOffset.clone()
+    });
+  }
+
+  // Add small components before applying the PCB calibration.
+  addPcbSurfaceComponents(board, thickness);
 
   // Align the completed board, including its components and markings.
   alignCircuitBoard(board);
