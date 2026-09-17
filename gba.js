@@ -123,6 +123,20 @@ function animateExplosion(deltaTime) {
   }
 }
 
+// Shell visibility.
+const hideShellCheckbox = document.getElementById("hide-shell");
+const shellParts = [];
+
+function updateShellVisibility() {
+  const visible = !hideShellCheckbox.checked;
+
+  for (const part of shellParts) {
+    part.visible = visible;
+  }
+}
+
+hideShellCheckbox.addEventListener("change", updateShellVisibility);
+
 // Model loader.
 const loader = new GLTFLoader();
 
@@ -372,6 +386,25 @@ async function loadConsole() {
     const gltf = await loader.loadAsync("./assets/gba.glb");
 
     configureScreenLens(gltf.scene);
+
+    // Collect the outer shell, protective window and screen.
+    for (const name of [
+      "front",
+      "rear",
+      "cover",
+      "lens",
+      "lens_frame",
+      "lcd_face"
+    ]) {
+      const part = gltf.scene.getObjectByName(name);
+
+      if (part) {
+        shellParts.push(part);
+      }
+    }
+
+    // Apply the checkbox state once the model is available.
+    updateShellVisibility();
 
     // Remove disconnected fragments from both shells.
     for (const name of ["front", "rear"]) {
@@ -697,6 +730,164 @@ function createChip(width, height, horizontalPins, verticalPins) {
   return chip;
 }
 
+// Build the metal crystal package and its insulating base.
+function createCrystal() {
+  const crystal = new THREE.Group();
+  crystal.name = "crystal";
+
+  const baseMaterial = new THREE.MeshStandardMaterial({
+    color: 0x20232a,
+    metalness: 0,
+    roughness: 0.65
+  });
+
+  const metalMaterial = new THREE.MeshStandardMaterial({
+    color: 0xbfc3c7,
+    metalness: 1,
+    roughness: 0.3
+  });
+
+  // Add a rounded rectangular layer, extruded along local Z.
+  function addLayer(width, height, depth, radius, z, material) {
+    const x = -width / 2;
+    const y = -height / 2;
+    const shape = new THREE.Shape();
+
+    shape.moveTo(x + radius, y);
+    shape.lineTo(x + width - radius, y);
+    shape.quadraticCurveTo(x + width, y, x + width, y + radius);
+
+    shape.lineTo(x + width, y + height - radius);
+    shape.quadraticCurveTo(
+      x + width, y + height,
+      x + width - radius, y + height
+    );
+
+    shape.lineTo(x + radius, y + height);
+    shape.quadraticCurveTo(x, y + height, x, y + height - radius);
+
+    shape.lineTo(x, y + radius);
+    shape.quadraticCurveTo(x, y, x + radius, y);
+    shape.closePath();
+
+    const geometry = new THREE.ExtrudeGeometry(shape, {
+      depth: depth,
+      bevelEnabled: false,
+      curveSegments: 12
+    });
+
+    const layer = new THREE.Mesh(geometry, material);
+    layer.position.z = z;
+
+    crystal.add(layer);
+  }
+
+  // Insulating base, metal casing and inset top lid.
+  addLayer(0.29, 0.8, 0.035, 0.12, 0, baseMaterial);
+  addLayer(0.27, 0.77, 0.12, 0.12, 0.035, metalMaterial);
+  addLayer(0.23, 0.68, 0.015, 0.1, 0.15, metalMaterial);
+
+  // Print along the length of the casing.
+  const label = createChipLabel(0.68, 0.23, ["D419"]);
+
+  label.name = "crystal_label";
+  label.rotation.z = Math.PI / 2;
+  label.position.z = 0.166;
+  label.material.color.set(0x555555);
+
+  crystal.add(label);
+
+  return crystal;
+}
+
+// Fit the circuit board to the six fixed screw axes.
+function alignCircuitBoard(board) {
+  function alignPoint(point) {
+    const x = point.x;
+    const y = point.y;
+    const xy = x * y;
+    const yy = y * y;
+    const xyy = x * yy;
+
+    point.x =
+      -0.0385680468
+      + 0.986720407 * x
+      + 0.00269863246 * y
+      + 0.0111197408 * xy
+      - 0.000674551318 * yy
+      - 0.00131034960 * xyy;
+
+    point.y =
+      -0.0162130082
+      + 0.000471694358 * x
+      + 1.06370489 * y
+      + 0.000117643643 * xy
+      + 0.00425071363 * yy
+      - 0.000301850031 * xyy;
+
+    return point;
+  }
+
+  board.updateWorldMatrix(true, true);
+
+  const worldToBoard = board.matrixWorld.clone().invert();
+  const point = new THREE.Vector3();
+
+  for (const child of board.children) {
+    const initialPosition = child.position.clone();
+    const alignedPosition = alignPoint(initialPosition.clone());
+    const displacement = alignedPosition.clone().sub(initialPosition);
+
+    // Transform every mesh in board coordinates, preserving its UVs.
+    child.traverse((object) => {
+      if (!object.isMesh) {
+        return;
+      }
+
+      const meshToBoard = new THREE.Matrix4().multiplyMatrices(
+        worldToBoard,
+        object.matrixWorld
+      );
+
+      const boardToMesh = meshToBoard.clone().invert();
+
+      object.geometry = object.geometry.clone();
+
+      const positions = object.geometry.getAttribute("position");
+
+      for (let i = 0; i < positions.count; i++) {
+        point.fromBufferAttribute(positions, i);
+        point.applyMatrix4(meshToBoard);
+
+        alignPoint(point);
+
+        // The child's new position supplies this displacement.
+        point.sub(displacement);
+        point.applyMatrix4(boardToMesh);
+
+        positions.setXYZ(i, point.x, point.y, point.z);
+      }
+
+      positions.needsUpdate = true;
+
+      object.geometry.computeVertexNormals();
+      object.geometry.computeBoundingBox();
+      object.geometry.computeBoundingSphere();
+    });
+
+    child.position.copy(alignedPosition);
+
+    // Keep the corrected position when the explosion animation runs.
+    for (const part of movableParts) {
+      if (part.object === child) {
+        part.initialPosition.copy(alignedPosition);
+      }
+    }
+  }
+
+  board.updateWorldMatrix(true, true);
+}
+
 // Build the textured circuit board and its main chips.
 async function createCircuitBoard() {
   const board = new THREE.Group();
@@ -976,6 +1167,28 @@ async function createCircuitBoard() {
       offset: settings.offset
     });
   }
+
+  // Position the crystal on the front reference image.
+  const crystal = createCrystal();
+  const crystalPoint = pcbPoint(669, 304);
+
+  crystal.position.set(
+    crystalPoint.x,
+    crystalPoint.y,
+    thickness / 2 + 0.002
+  );
+
+  board.add(crystal);
+
+  // Register its movement relative to the board.
+  movableParts.push({
+    object: crystal,
+    initialPosition: crystal.position.clone(),
+    offset: new THREE.Vector3(-1, 0.55, 1.85)
+  });
+
+  // Align the completed board, including its components and markings.
+  alignCircuitBoard(board);
 
   return board;
 }

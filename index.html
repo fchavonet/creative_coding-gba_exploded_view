@@ -38,8 +38,14 @@
         <!-- TOP CONTAINER -->
         <div class="fixed top-0 left-0 w-full h-auto p-4 flex flex-row justify-between items-center z-2">
             <!-- EXPLODED VIEW CONTROL -->
-            <div class="tooltip tooltip-bottom w-72" data-tip="Swipe to explode or reassemble the GBA">
-                <input id="spread" class="range range-xs [--range-thumb-size:12px] [--range-p:2px] [--radius-selector:0px] w-full" type="range" min="0" max="100" value="0">
+            <div class="flex flex-row justify-center items-center gap-2">
+                <label class="tooltip tooltip-bottom w-72 flex flex-row justify-center items-center" data-tip="Swipe to explode or reassemble the GBA">
+                    <input id="spread" class="range range-xs [--range-thumb-size:12px] [--range-p:2px] [--radius-selector:0px]" type="range" min="0" max="100" value="0" aria-label="Exploded view">
+                </label>
+
+                <label class="tooltip tooltip-right flex flex-row justify-center items-center gap-2 text-xs whitespace-nowrap" data-tip="Hide shell">
+                    <input id="hide-shell" type="checkbox" class="toggle toggle-xs rounded-none [--radius-selector:0px] cursor-pointer" aria-label="Hide shell and screen">
+                </label>
             </div>
 
             <!-- Toggle mode button -->
