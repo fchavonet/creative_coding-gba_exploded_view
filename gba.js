@@ -1864,6 +1864,152 @@ function addPcbSurfaceComponents(board, thickness) {
   }
 }
 
+// Build a shoulder switch with a round actuator and folded metal supports.
+function createShoulderSwitch() {
+  const shoulderSwitch = new THREE.Group();
+
+  const housingMaterial = new THREE.MeshStandardMaterial({
+    color: 0x17191c,
+    metalness: 0,
+    roughness: 0.72
+  });
+
+  const actuatorMaterial = new THREE.MeshStandardMaterial({
+    color: 0x292c30,
+    metalness: 0,
+    roughness: 0.85
+  });
+
+  const metalMaterial = new THREE.MeshStandardMaterial({
+    color: 0xbfc3c7,
+    metalness: 0.9,
+    roughness: 0.32
+  });
+
+  function addBox(width, height, depth, material, x, y, z) {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(width, height, depth),
+      material
+    );
+
+    mesh.position.set(x, y, z);
+    shoulderSwitch.add(mesh);
+
+    return mesh;
+  }
+
+  // Plastic core and slightly wider bottom base.
+  addBox(
+    0.40, 0.18, 0.40,
+    housingMaterial,
+    0, 0, 0.15
+  );
+
+  addBox(
+    0.44, 0.035, 0.44,
+    housingMaterial,
+    0, -0.1075, 0.15
+  );
+
+  // Thin metal casing around the plastic core.
+  for (const sign of [-1, 1]) {
+    addBox(
+      0.012, 0.18, 0.424,
+      metalMaterial,
+      sign * 0.206, 0, 0.15
+    );
+
+    addBox(
+      0.424, 0.18, 0.012,
+      metalMaterial,
+      0, 0, 0.15 + sign * 0.206
+    );
+  }
+
+  // Metal face surrounding the actuator.
+  addBox(
+    0.424, 0.012, 0.424,
+    metalMaterial,
+    0, 0.096, 0.15
+  );
+
+  // Dark collar at the base of the round actuator.
+  const collar = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.105, 0.105, 0.025, 32),
+    housingMaterial
+  );
+
+  collar.position.set(0, 0.1145, 0.15);
+  shoulderSwitch.add(collar);
+
+  // CylinderGeometry is already oriented along the Y axis.
+  const actuator = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.082, 0.095, 0.14, 32),
+    actuatorMaterial
+  );
+
+  actuator.position.set(0, 0.197, 0.15);
+  shoulderSwitch.add(actuator);
+
+  // Four small dark retaining studs on the metal face.
+  for (const xSign of [-1, 1]) {
+    for (const zSign of [-1, 1]) {
+      const stud = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.025, 0.028, 0.014, 16),
+        housingMaterial
+      );
+
+      stud.position.set(
+        xSign * 0.16,
+        0.109,
+        0.15 + zSign * 0.16
+      );
+
+      shoulderSwitch.add(stud);
+    }
+  }
+
+  // Folded side supports extending toward the PCB.
+  for (const sign of [-1, 1]) {
+    // Bridge joining the casing to the support.
+    addBox(
+      0.065, 0.035, 0.14,
+      metalMaterial,
+      sign * 0.2375, -0.065, 0.08
+    );
+
+    // Upright section of the folded support.
+    addBox(
+      0.018, 0.15, 0.14,
+      metalMaterial,
+      sign * 0.261, -0.1225, 0.08
+    );
+
+    // Flat mounting foot resting on the board.
+    addBox(
+      0.11, 0.23, 0.02,
+      metalMaterial,
+      sign * 0.225, -0.20, 0.01
+    );
+
+    // Narrow end of the mounting foot.
+    addBox(
+      0.055, 0.065, 0.02,
+      metalMaterial,
+      sign * 0.225, -0.3475, 0.01
+    );
+
+    // Electrical terminal emerging below the housing.
+    addBox(
+      0.028, 0.18, 0.025,
+      metalMaterial,
+      sign * 0.12, -0.215, 0.075
+    );
+  }
+
+  return shoulderSwitch;
+}
+
 // Build the textured circuit board and its main chips.
 async function createCircuitBoard() {
   const board = new THREE.Group();
@@ -2510,6 +2656,49 @@ async function createCircuitBoard() {
     initialPosition: u10.position.clone(),
     offset: frontComponentsOffset.clone()
   });
+
+  // Initial shoulder switch placement on the front PCB texture.
+  const shoulderSwitchSettings = [
+    {
+      name: "shoulder_switch_left",
+      u: 185,
+      v: 250,
+      angle: 9,
+      offset: new THREE.Vector3(-0.55, 0.8, 0.85)
+    },
+    {
+      name: "shoulder_switch_right",
+      u: 1815,
+      v: 250,
+      angle: -9,
+      offset: new THREE.Vector3(0.55, 0.8, 0.85)
+    }
+  ];
+
+  for (const settings of shoulderSwitchSettings) {
+    const shoulderSwitch = createShoulderSwitch();
+    const point = pcbPoint(settings.u, settings.v);
+
+    shoulderSwitch.name = settings.name;
+
+    shoulderSwitch.position.set(
+      point.x,
+      point.y,
+      thickness / 2 + 0.004
+    );
+
+    shoulderSwitch.rotation.z = THREE.MathUtils.degToRad(
+      settings.angle
+    );
+
+    board.add(shoulderSwitch);
+
+    movableParts.push({
+      object: shoulderSwitch,
+      initialPosition: shoulderSwitch.position.clone(),
+      offset: settings.offset.clone()
+    });
+  }
 
   // Add small components before applying the PCB calibration.
   addPcbSurfaceComponents(board, thickness);
