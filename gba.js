@@ -800,6 +800,229 @@ function createCrystal() {
   return crystal;
 }
 
+// Build the T1 component with its base and eight metallic contacts.
+function createTransformer() {
+  const transformer = new THREE.Group();
+  transformer.name = "transformer";
+
+  const baseMaterial = new THREE.MeshStandardMaterial({
+    color: 0x171b24,
+    metalness: 0,
+    roughness: 0.65
+  });
+
+  const coreMaterial = new THREE.MeshStandardMaterial({
+    color: 0x303238,
+    metalness: 0,
+    roughness: 0.8
+  });
+
+  const contactMaterial = new THREE.MeshStandardMaterial({
+    color: 0xbfc3c7,
+    metalness: 1,
+    roughness: 0.3
+  });
+
+  // Square insulating base.
+  const base = new THREE.Mesh(
+    new THREE.BoxGeometry(0.58, 0.58, 0.08),
+    baseMaterial
+  );
+
+  base.position.z = 0.06;
+  transformer.add(base);
+
+  // Cylindrical body, perpendicular to the board.
+  const core = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.25, 0.25, 0.22, 32),
+    coreMaterial
+  );
+
+  core.rotation.x = Math.PI / 2;
+  core.position.z = 0.17;
+  transformer.add(core);
+
+  // Slightly raised circular top.
+  const cap = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.19, 0.19, 0.025, 32),
+    baseMaterial
+  );
+
+  cap.rotation.x = Math.PI / 2;
+  cap.position.z = 0.29;
+  transformer.add(cap);
+
+  // Four contacts on each side.
+  for (const y of [-0.33, 0.33]) {
+    for (let i = 0; i < 4; i++) {
+      const contact = new THREE.Mesh(
+        new THREE.BoxGeometry(0.065, 0.14, 0.03),
+        contactMaterial
+      );
+
+      contact.position.set(
+        -0.225 + i * 0.15,
+        y,
+        0.025
+      );
+
+      transformer.add(contact);
+    }
+  }
+
+  // Print just above the top surface.
+  const label = createChipLabel(0.3, 0.18, ["T1"]);
+
+  label.name = "transformer_label";
+  label.position.z = 0.3035;
+
+  transformer.add(label);
+
+  return transformer;
+}
+
+// Build an electrolytic capacitor with its base and top markings.
+function createCapacitor(radius, height, marking) {
+  const capacitor = new THREE.Group();
+
+  const baseMaterial = new THREE.MeshStandardMaterial({
+    color: 0x171b24,
+    metalness: 0,
+    roughness: 0.65
+  });
+
+  const metalMaterial = new THREE.MeshStandardMaterial({
+    color: 0xbfc3c7,
+    metalness: 1,
+    roughness: 0.3
+  });
+
+  const topMaterial = new THREE.MeshStandardMaterial({
+    color: 0xd5d7d5,
+    metalness: 0.7,
+    roughness: 0.4
+  });
+
+  // Square insulating base.
+  const base = new THREE.Mesh(
+    new THREE.BoxGeometry(
+      radius * 2.2,
+      radius * 2.2,
+      0.05
+    ),
+    baseMaterial
+  );
+
+  base.position.z = 0.025;
+  capacitor.add(base);
+
+  // Metal can, perpendicular to the board.
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius, radius, height, 32),
+    metalMaterial
+  );
+
+  body.rotation.x = Math.PI / 2;
+  body.position.z = height / 2 + 0.04;
+  capacitor.add(body);
+
+  // Top disk overlapping the can slightly to avoid a gap.
+  const top = new THREE.Mesh(
+    new THREE.CylinderGeometry(
+      radius * 0.92,
+      radius * 0.92,
+      0.006,
+      32
+    ),
+    topMaterial
+  );
+
+  top.rotation.x = Math.PI / 2;
+  top.position.z = height + 0.042;
+  capacitor.add(top);
+
+  // Dark polarity stripe on the top surface.
+  const stripe = new THREE.Mesh(
+    new THREE.BoxGeometry(0.02, radius * 1.5, 0.004),
+    baseMaterial
+  );
+
+  stripe.position.set(-radius * 0.6, 0, height + 0.047);
+  capacitor.add(stripe);
+
+  // Printed value, placed above the top disk.
+  const label = createChipLabel(
+    radius * 1.4,
+    radius * 0.7,
+    [marking]
+  );
+
+  label.name = "capacitor_label";
+  label.position.set(radius * 0.1, 0, height + 0.046);
+  label.material.color.set(0x353d3c);
+
+  capacitor.add(label);
+
+  return capacitor;
+}
+
+// Build the rear inductor and its printed marking.
+function createInductor() {
+  const inductor = new THREE.Group();
+  inductor.name = "inductor";
+
+  const darkMaterial = new THREE.MeshStandardMaterial({
+    color: 0x20232a,
+    metalness: 0,
+    roughness: 0.7
+  });
+
+  const bodyMaterial = new THREE.MeshStandardMaterial({
+    color: 0x245a6c,
+    metalness: 0,
+    roughness: 0.6
+  });
+
+  // Square base resting on the board.
+  const base = new THREE.Mesh(
+    new THREE.BoxGeometry(0.46, 0.46, 0.04),
+    darkMaterial
+  );
+
+  base.position.z = 0.02;
+  inductor.add(base);
+
+  // Cylindrical body.
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.21, 0.21, 0.27, 32),
+    bodyMaterial
+  );
+
+  body.rotation.x = Math.PI / 2;
+  body.position.z = 0.15;
+  inductor.add(body);
+
+  // Dark circular top.
+  const top = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.15, 0.15, 0.01, 32),
+    darkMaterial
+  );
+
+  top.rotation.x = Math.PI / 2;
+  top.position.z = 0.289;
+  inductor.add(top);
+
+  // Place the marking just above the top surface.
+  const label = createChipLabel(0.27, 0.16, ["101"]);
+
+  label.name = "inductor_label";
+  label.position.z = 0.295;
+
+  inductor.add(label);
+
+  return inductor;
+}
+
 // Fit the circuit board to the six fixed screw axes.
 function alignCircuitBoard(board) {
   function alignPoint(point) {
@@ -1185,6 +1408,87 @@ async function createCircuitBoard() {
     object: crystal,
     initialPosition: crystal.position.clone(),
     offset: new THREE.Vector3(-1, 0.55, 1.85)
+  });
+
+  // Position T1 on the front reference image.
+  const transformer = createTransformer();
+  const transformerPoint = pcbPoint(230, 846);
+
+  transformer.position.set(
+    transformerPoint.x,
+    transformerPoint.y,
+    thickness / 2 + 0.002
+  );
+
+  board.add(transformer);
+
+  // Register its movement before calibrating the board.
+  movableParts.push({
+    object: transformer,
+    initialPosition: transformer.position.clone(),
+    offset: new THREE.Vector3(-1.25, -0.8, 1.6)
+  });
+
+  // Electrolytic capacitors positioned on the back reference image.
+  const capacitorSettings = [
+    { u: 1570, v: 577, radius: 0.28, height: 0.38, marking: "470" },
+    { u: 1708, v: 646, radius: 0.21, height: 0.3, marking: "100" },
+    { u: 432, v: 781, radius: 0.19, height: 0.28, marking: "100" },
+    { u: 1756, v: 804, radius: 0.19, height: 0.28, marking: "100" }
+  ];
+
+  for (let i = 0; i < capacitorSettings.length; i++) {
+    const settings = capacitorSettings[i];
+
+    const capacitor = createCapacitor(
+      settings.radius,
+      settings.height,
+      settings.marking
+    );
+
+    capacitor.name = `capacitor_${i + 1}`;
+
+    // Convert back-photo coordinates to board coordinates.
+    const point = pcbPoint(
+      2006 - settings.u,
+      settings.v + 10
+    );
+
+    capacitor.position.set(
+      point.x,
+      point.y,
+      -thickness / 2 - 0.002
+    );
+
+    capacitor.rotation.y = Math.PI;
+    board.add(capacitor);
+
+    // Move the four capacitors together during the explosion.
+    movableParts.push({
+      object: capacitor,
+      initialPosition: capacitor.position.clone(),
+      offset: new THREE.Vector3(-0.25, -0.6, -2.25)
+    });
+  }
+
+  // Position the inductor on the back reference image.
+  const inductor = createInductor();
+  const inductorPoint = pcbPoint(2006 - 1594, 834 + 10);
+
+  inductor.position.set(
+    inductorPoint.x,
+    inductorPoint.y,
+    -thickness / 2 - 0.002
+  );
+
+  inductor.rotation.y = Math.PI;
+  board.add(inductor);
+
+  // Register its movement before calibrating the board.
+  movableParts.push({
+    object: inductor,
+    initialPosition: inductor.position.clone(),
+    offset: new THREE.Vector3(0.35, -1.1, -2.1)
   });
 
   // Align the completed board, including its components and markings.
