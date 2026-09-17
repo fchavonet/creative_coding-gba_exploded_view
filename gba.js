@@ -1202,6 +1202,184 @@ function createLcdRibbon(socket) {
   return ribbon;
 }
 
+// Build the cartridge socket with molded guides and exposed solder tails.
+const cartridgeMounts = [
+  { u: 452, v: 590 },
+  { u: 1447, v: 588 }
+];
+
+function createCartridgeSocket() {
+  const socket = new THREE.Group();
+  socket.name = "cartridge_socket";
+
+  const housingMaterial = new THREE.MeshStandardMaterial({
+    color: 0x101214,
+    metalness: 0,
+    roughness: 0.78
+  });
+
+  const contactMaterial = new THREE.MeshStandardMaterial({
+    color: 0xbda365,
+    metalness: 1,
+    roughness: 0.35
+  });
+
+  const solderMaterial = new THREE.MeshStandardMaterial({
+    color: 0xc5c8c9,
+    metalness: 0.9,
+    roughness: 0.35
+  });
+
+  function addBox(width, height, depth, material, x, y, z) {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(width, height, depth),
+      material
+    );
+
+    mesh.position.set(x, y, z);
+    socket.add(mesh);
+
+    return mesh;
+  }
+
+  // Plastic base covering the PCB connection area.
+  addBox(
+    4.42, 1.34, 0.06,
+    housingMaterial,
+    0, -0.13, 0.045
+  );
+
+  // Broad outer wall.
+  addBox(
+    4.08, 0.94, 0.07,
+    housingMaterial,
+    0, -0.04, 0.445
+  );
+
+  // Raised lip along the cartridge opening.
+  addBox(
+    4.08, 0.065, 0.035,
+    housingMaterial,
+    0, 0.405, 0.492
+  );
+
+  // Lower plastic housing enclosing the contact terminations.
+  addBox(
+    4.42, 0.28, 0.45,
+    housingMaterial,
+    0, -0.64, 0.235
+  );
+
+  // Subtle molded ridge across the outer wall.
+  addBox(
+    3.92, 0.045, 0.018,
+    housingMaterial,
+    0, -0.34, 0.487
+  );
+
+  // Side guides and wider mounting feet.
+  for (const sign of [-1, 1]) {
+    addBox(
+      0.14, 1.08, 0.45,
+      housingMaterial,
+      sign * 2.14, 0, 0.235
+    );
+
+    addBox(
+      0.28, 0.28, 0.1,
+      housingMaterial,
+      sign * 2.14, -0.43, 0.075
+    );
+
+    // Short raised shoulder near the insertion end.
+    addBox(
+      0.2, 0.24, 0.08,
+      housingMaterial,
+      sign * 2.11, 0.36, 0.5
+    );
+
+    addBox(
+      0.12, 0.2, 0.025,
+      solderMaterial,
+      sign * 2.25, -0.43, 0.018
+    );
+  }
+
+  // Internal cartridge contacts and PCB-facing connection pins.
+  const contactCount = 32;
+  const contactSpan = 3.76;
+  const contactPitch = contactSpan / (contactCount - 1);
+
+  for (let i = 0; i < contactCount; i++) {
+    const x = -contactSpan / 2 + i * contactPitch;
+
+    // Contact strip inside the insertion channel.
+    addBox(
+      0.028, 0.54, 0.028,
+      contactMaterial,
+      x, -0.03, 0.09
+    );
+
+    // Raised contact area facing the cartridge.
+    addBox(
+      0.032, 0.16, 0.035,
+      contactMaterial,
+      x, -0.1, 0.115
+    );
+
+    // Connection pin emerging toward the PCB beneath the housing.
+    addBox(
+      0.026, 0.038, 0.12,
+      contactMaterial,
+      x, -0.64, -0.035
+    );
+
+    // Molded separators between adjacent contact strips.
+    if (i < contactCount - 1) {
+      addBox(
+        0.018, 0.67, 0.035,
+        housingMaterial,
+        x + contactPitch / 2, 0.015, 0.092
+      );
+    }
+  }
+
+  // Side arms with retaining hooks passing through the PCB.
+  for (const mount of cartridgeMounts) {
+    // Coordinates relative to the socket, before board calibration.
+    const x = (mount.u - 976) * 0.00518;
+    const y = (458 - mount.v) * 0.00518;
+    const sign = Math.sign(x);
+
+    const rootX = sign * 2.1;
+    const armWidth = Math.abs(x - rootX) + 0.09;
+    const armCenterX = (rootX + x) / 2;
+
+    // Horizontal arm connecting the housing to the slot.
+    addBox(
+      armWidth, 0.24, 0.12,
+      housingMaterial,
+      armCenterX, y, 0.105
+    );
+
+    // Narrow stem crossing the board.
+    addBox(
+      0.06, 0.19, 0.17,
+      housingMaterial,
+      x, y, -0.025
+    );
+
+    // Outward-facing retaining lip beneath the board.
+    addBox(
+      0.12, 0.19, 0.035,
+      housingMaterial,
+      x + sign * 0.035, y, -0.12
+    );
+  }
+
+  return socket;
+}
+
 // Fit the circuit board to the six fixed screw axes.
 function alignCircuitBoard(board) {
   function alignPoint(point) {
@@ -1371,6 +1549,41 @@ async function createCircuitBoard() {
     );
 
     shape.holes.push(hole);
+  }
+
+  // Cut the two retaining slots through the board.
+  for (const mount of cartridgeMounts) {
+    const center = pcbPoint(
+      2006 - mount.u,
+      mount.v + 10
+    );
+
+    const halfWidth = 0.05;
+    const halfHeight = 0.14;
+    const radius = 0.025;
+
+    const left = center.x - halfWidth;
+    const right = center.x + halfWidth;
+    const bottom = center.y - halfHeight;
+    const top = center.y + halfHeight;
+
+    const slot = new THREE.Path();
+
+    // Clockwise rounded rectangle.
+    slot.moveTo(left + radius, bottom);
+
+    slot.quadraticCurveTo(left, bottom, left, bottom + radius);
+    slot.lineTo(left, top - radius);
+    slot.quadraticCurveTo(left, top, left + radius, top);
+
+    slot.lineTo(right - radius, top);
+    slot.quadraticCurveTo(right, top, right, top - radius);
+
+    slot.lineTo(right, bottom + radius);
+    slot.quadraticCurveTo(right, bottom, right - radius, bottom);
+
+    slot.closePath();
+    shape.holes.push(slot);
   }
 
   // Extrude the outline and center its thickness around Z = 0.
@@ -1688,6 +1901,26 @@ async function createCircuitBoard() {
     object: lcdSocket,
     initialPosition: lcdSocket.position.clone(),
     offset: new THREE.Vector3(-0.2, 1.35, -1.2)
+  });
+
+  // Position the cartridge socket on the back reference image.
+  const cartridgeSocket = createCartridgeSocket();
+  const cartridgeSocketPoint = pcbPoint(2006 - 976, 458 + 10);
+
+  cartridgeSocket.position.set(
+    cartridgeSocketPoint.x,
+    cartridgeSocketPoint.y,
+    -thickness / 2 - 0.002
+  );
+
+  cartridgeSocket.rotation.y = Math.PI;
+  board.add(cartridgeSocket);
+
+  // Register its movement before calibrating the board.
+  movableParts.push({
+    object: cartridgeSocket,
+    initialPosition: cartridgeSocket.position.clone(),
+    offset: new THREE.Vector3(0, 1.6, -1.55)
   });
 
   // Align the completed board, including its components and markings.
