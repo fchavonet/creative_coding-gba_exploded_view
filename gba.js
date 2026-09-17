@@ -2010,6 +2010,104 @@ function createShoulderSwitch() {
   return shoulderSwitch;
 }
 
+// Build the PCB-mounted power switch mechanism.
+function createPowerSwitch() {
+  const powerSwitch = new THREE.Group();
+
+  const metalMaterial = new THREE.MeshStandardMaterial({
+    color: 0xbfc3c7,
+    metalness: 0.9,
+    roughness: 0.35
+  });
+
+  const plasticMaterial = new THREE.MeshStandardMaterial({
+    color: 0x202226,
+    metalness: 0,
+    roughness: 0.75
+  });
+
+  function addBox(width, height, depth, material, x, y, z) {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(width, height, depth),
+      material
+    );
+
+    mesh.position.set(x, y, z);
+    powerSwitch.add(mesh);
+  }
+
+  // Insulating base.
+  addBox(
+    0.94, 0.25, 0.045,
+    plasticMaterial,
+    0, 0, 0.0225
+  );
+
+  // Metal cover.
+  addBox(
+    0.88, 0.22, 0.025,
+    metalMaterial,
+    0, 0, 0.205
+  );
+
+  // Rear wall, facing the electrical contacts.
+  addBox(
+    0.88, 0.025, 0.16,
+    metalMaterial,
+    0, 0.0975, 0.1125
+  );
+
+  // End walls and mounting tabs.
+  for (const sign of [-1, 1]) {
+    addBox(
+      0.025, 0.22, 0.16,
+      metalMaterial,
+      sign * 0.4275, 0, 0.1125
+    );
+
+    addBox(
+      0.12, 0.25, 0.025,
+      metalMaterial,
+      sign * 0.48, 0, 0.0125
+    );
+  }
+
+  // Dark interior behind the opening facing the external slider.
+  addBox(
+    0.80, 0.035, 0.13,
+    plasticMaterial,
+    0, -0.055, 0.1125
+  );
+
+  // Lower metal lip framing the opening.
+  addBox(
+    0.88, 0.025, 0.025,
+    metalMaterial,
+    0, -0.0975, 0.045
+  );
+
+  // Shorten the actuator while preserving its engagement with the slider.
+  addBox(
+    0.16, 0.36, 0.105,
+    plasticMaterial,
+    0.20, -0.24, 0.115
+  );
+
+  // Four solder terminals distributed along the PCB pads.
+  for (let i = 0; i < 4; i++) {
+    addBox(
+      0.11, 0.16, 0.025,
+      metalMaterial,
+      (i - 1.5) * 0.20, 0.17, 0.0175
+    );
+  }
+
+  // Reduce the mechanism's depth while keeping its PCB mounting plane.
+  powerSwitch.scale.z = 0.6;
+
+  return powerSwitch;
+}
+
 // Build the textured circuit board and its main chips.
 async function createCircuitBoard() {
   const board = new THREE.Group();
@@ -2699,6 +2797,34 @@ async function createCircuitBoard() {
       offset: settings.offset.clone()
     });
   }
+
+  // Initial power switch placement on the back PCB texture.
+  const powerSwitch = createPowerSwitch();
+
+  powerSwitch.name = "power_switch";
+
+  const powerSwitchPoint = pcbPoint(2006 - 1660, 929 + 10);
+
+  powerSwitch.position.set(
+    powerSwitchPoint.x,
+    powerSwitchPoint.y,
+    -thickness / 2 - 0.004
+  );
+
+  powerSwitch.rotation.y = Math.PI;
+  powerSwitch.rotation.z = THREE.MathUtils.degToRad(17);
+
+  // Move the mechanism toward the slider along its local axis.
+  powerSwitch.translateY(-0.05);
+
+  board.add(powerSwitch);
+
+  // Separate the mechanism from the external slider during the explosion.
+  movableParts.push({
+    object: powerSwitch,
+    initialPosition: powerSwitch.position.clone(),
+    offset: new THREE.Vector3(-1.3, -0.5, 0)
+  });
 
   // Add small components before applying the PCB calibration.
   addPcbSurfaceComponents(board, thickness);
