@@ -547,6 +547,60 @@ function pcbPoint(u, v) {
   );
 }
 
+// Create printed markings for a chip.
+function createChipLabel(width, height, lines) {
+  const labelWidth = width * 0.86;
+  const labelHeight = height * 0.7;
+
+  const canvas = document.createElement("canvas");
+
+  canvas.width = 512;
+  canvas.height = Math.round(
+    canvas.width * labelHeight / labelWidth
+  );
+
+  const context = canvas.getContext("2d");
+  const lineSpacing = canvas.height / (lines.length + 1);
+  const fontSize = Math.floor(lineSpacing * 0.55);
+
+  context.fillStyle = "#9a9d98";
+  context.font = `${fontSize}px monospace`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+
+  for (let i = 0; i < lines.length; i++) {
+    context.fillText(
+      lines[i],
+      canvas.width / 2,
+      lineSpacing * (i + 1),
+      canvas.width * 0.94
+    );
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+  const label = new THREE.Mesh(
+    new THREE.PlaneGeometry(labelWidth, labelHeight),
+    new THREE.MeshStandardMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false,
+      metalness: 0,
+      roughness: 0.7
+    })
+  );
+
+  label.name = "chip_label";
+
+  // Place the print just above the package surface.
+  label.position.z = 0.1285;
+
+  return label;
+}
+
 // Build a chip package with metallic pins.
 function createChip(width, height, horizontalPins, verticalPins) {
   const chip = new THREE.Group();
@@ -619,6 +673,26 @@ function createChip(width, height, horizontalPins, verticalPins) {
       );
     }
   }
+
+  // Add a small orientation mark on the package.
+  const orientationMark = new THREE.Mesh(
+    new THREE.CircleGeometry(0.025, 24),
+    new THREE.MeshStandardMaterial({
+      color: 0x30343a,
+      metalness: 0,
+      roughness: 0.65
+    })
+  );
+
+  orientationMark.name = "chip_orientation_mark";
+
+  orientationMark.position.set(
+    -width * 0.4,
+    -height * 0.36,
+    0.1285
+  );
+
+  chip.add(orientationMark);
 
   return chip;
 }
@@ -799,7 +873,14 @@ async function createCircuitBoard() {
       height: 0.98,
       horizontalPins: 38,
       verticalPins: 26,
-      offset: new THREE.Vector3(-0.45, 0.5, 2.2)
+      offset: new THREE.Vector3(-0.45, 0.5, 2.2),
+      back: false,
+      labels: [
+        "CPU AGB A",
+        "© 2000 Nintendo",
+        "JAPAN ARM",
+        "0244"
+      ]
     },
     {
       name: "ram",
@@ -809,7 +890,43 @@ async function createCircuitBoard() {
       height: 0.94,
       horizontalPins: 0,
       verticalPins: 24,
-      offset: new THREE.Vector3(0.5, 0.8, 1.9)
+      offset: new THREE.Vector3(0.5, 0.8, 1.9),
+      back: false,
+      labels: [
+        "JAPAN",
+        "82D12160",
+        "-10FN"
+      ]
+    },
+    {
+      name: "amp",
+      u: 331,
+      v: 670,
+      width: 0.58,
+      height: 0.36,
+      horizontalPins: 9,
+      verticalPins: 0,
+      offset: new THREE.Vector3(1.35, -0.4, -1.7),
+      back: true,
+      labels: [
+        "AMP AGB",
+        "IR3R60N"
+      ]
+    },
+    {
+      name: "power",
+      u: 1756,
+      v: 379,
+      width: 0.3,
+      height: 0.44,
+      horizontalPins: 0,
+      verticalPins: 8,
+      offset: new THREE.Vector3(-1.3, 0.5, -1.65),
+      back: true,
+      labels: [
+        "MITSUMI",
+        "514X"
+      ]
     }
   ];
 
@@ -821,13 +938,33 @@ async function createCircuitBoard() {
       settings.verticalPins
     );
 
-    const point = pcbPoint(settings.u, settings.v);
-
     chip.name = settings.name;
-    chip.position.set(
-      point.x,
-      point.y,
-      thickness / 2 + 0.002
+
+    // Convert back-photo coordinates to the board coordinate system.
+    let u = settings.u;
+    let v = settings.v;
+    let z = thickness / 2 + 0.002;
+
+    if (settings.back) {
+      u = 2006 - u;
+      v += 10;
+      z = -thickness / 2 - 0.002;
+
+      // Face outward from the back of the board.
+      chip.rotation.y = Math.PI;
+    }
+
+    const point = pcbPoint(u, v);
+
+    chip.position.set(point.x, point.y, z);
+
+    // Attach the printed markings to the chip.
+    chip.add(
+      createChipLabel(
+        settings.width,
+        settings.height,
+        settings.labels
+      )
     );
 
     board.add(chip);
