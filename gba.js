@@ -92,6 +92,9 @@ const movableParts = [];
 // Shared displacement for the small components on the rear PCB face.
 const rearComponentsOffset = new THREE.Vector3(0, 0.35, -0.65);
 
+// Shared displacement for the small components on the front PCB face.
+const frontComponentsOffset = new THREE.Vector3(0, -0.25, 0.65);
+
 let explosionProgress = 0;
 let explosionTarget = 0;
 
@@ -1523,6 +1526,51 @@ function createThreePinPackage(spanX, spanY) {
   return component;
 }
 
+// Build a five-terminal package with three contacts on the left.
+function createFivePinPackage() {
+  const component = new THREE.Group();
+
+  const bodyMaterial = new THREE.MeshStandardMaterial({
+    color: 0x202326,
+    metalness: 0,
+    roughness: 0.65
+  });
+
+  const terminalMaterial = new THREE.MeshStandardMaterial({
+    color: 0xbfc3c7,
+    metalness: 0.85,
+    roughness: 0.35
+  });
+
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(0.10, 0.15, 0.065),
+    bodyMaterial
+  );
+
+  body.position.z = 0.0475;
+  component.add(body);
+
+  const terminalPositions = [
+    [-0.08, 0.047],
+    [-0.08, 0],
+    [-0.08, -0.047],
+    [0.08, 0.047],
+    [0.08, -0.047]
+  ];
+
+  for (const [x, y] of terminalPositions) {
+    const terminal = new THREE.Mesh(
+      new THREE.BoxGeometry(0.075, 0.028, 0.025),
+      terminalMaterial
+    );
+
+    terminal.position.set(x, y, 0.0175);
+    component.add(terminal);
+  }
+
+  return component;
+}
+
 // Build a small filter package with three terminals on each side.
 function createPcbFilter() {
   const filter = new THREE.Group();
@@ -1568,7 +1616,7 @@ function createPcbFilter() {
   return filter;
 }
 
-// Add surface-mounted components around the audio amplifier.
+// Add surface-mounted components on both PCB faces.
 function addPcbSurfaceComponents(board, thickness) {
   const resistorMaterial = new THREE.MeshStandardMaterial({
     color: 0x252729,
@@ -1588,7 +1636,7 @@ function addPcbSurfaceComponents(board, thickness) {
     roughness: 0.35
   });
 
-  // Pixel coordinates on the back PCB texture.
+  // Pixel coordinates on each component's PCB texture.
   // Angle describes the component orientation in that image.
   const settings = [
     { name: "R7", u: 231, v: 648, type: "resistor", angle: 0 },
@@ -1658,7 +1706,71 @@ function addPcbSurfaceComponents(board, thickness) {
     { name: "C40", u: 1831, v: 691, type: "capacitor", angle: 90 },
 
     // Resistor near the power switch.
-    { name: "R13", u: 1796, v: 915, type: "resistor", angle: 90 }
+    { name: "R13", u: 1796, v: 915, type: "resistor", angle: 90 },
+
+    // Front face: components above the processor and memory.
+    { name: "C34", u: 795, v: 206, type: "capacitor", angle: 0, front: true },
+    { name: "R36", u: 982, v: 206, type: "resistor", angle: 0, front: true },
+    { name: "C16", u: 1095, v: 201, type: "capacitor", angle: 0, front: true },
+    { name: "C17", u: 1172, v: 209, type: "capacitor", angle: 90, front: true },
+
+    // Front face: components below and beside the processor.
+    { name: "C5", u: 817, v: 502, type: "capacitor", angle: 0, front: true },
+    { name: "R5", u: 864, v: 507, type: "resistor", angle: 0, front: true },
+    { name: "R40", u: 895, v: 505, type: "resistor", angle: 90, front: true },
+    { name: "C6", u: 1122, v: 502, type: "capacitor", angle: 0, front: true },
+    { name: "C15", u: 1166, v: 436, type: "capacitor", angle: 90, front: true },
+
+    // Front face: capacitor below the memory.
+    { name: "C7", u: 1381, v: 527, type: "capacitor", angle: 0, front: true },
+
+    // Front face: components above and beside the crystal.
+    { name: "R45", u: 499, v: 214, type: "resistor", angle: 90, front: true },
+    { name: "C58", u: 523, v: 224, type: "capacitor", angle: 90, front: true },
+    { name: "C52", u: 767, v: 341, type: "capacitor", angle: 0, front: true },
+    { name: "C53", u: 767, v: 368, type: "capacitor", angle: 0, front: true },
+
+    // Front face: components beside the Start button area.
+    { name: "R32", u: 492, v: 689, type: "resistor", angle: 0, front: true },
+    { name: "C37", u: 492, v: 706, type: "capacitor", angle: 0, front: true },
+
+    // Front face: components below the A and B button contacts.
+    { name: "C9", u: 1578, v: 690, type: "capacitor", angle: 90, front: true },
+    { name: "C10", u: 1597, v: 690, type: "capacitor", angle: 90, front: true },
+    { name: "C12", u: 1819, v: 659, type: "capacitor", angle: 0, front: true },
+
+    // Front face: remaining components below the button contacts.
+    { name: "R3", u: 1633, v: 690, type: "resistor", angle: 90, front: true },
+    { name: "C11", u: 1652, v: 690, type: "capacitor", angle: 90, front: true },
+    { name: "R4", u: 1685, v: 689, type: "resistor", angle: 90, front: true },
+
+    // Front face: capacitor to the left of EM7.
+    { name: "C62", u: 550, v: 433, type: "capacitor", angle: 0, front: true },
+
+    // Front face: resistors above the speaker area.
+    { name: "R19", u: 1614, v: 770, type: "resistor", angle: 0, front: true },
+    { name: "R20", u: 1614, v: 790, type: "resistor", angle: 0, front: true },
+
+    // Front face: vertical component column beside the crystal, top to bottom.
+    { name: "C3", u: 728, v: 262, type: "capacitor", angle: 90, front: true },
+    { name: "R1", u: 728, v: 290, type: "resistor", angle: 90, front: true },
+    { name: "R41", u: 728, v: 319, type: "resistor", angle: 90, front: true },
+    { name: "C4", u: 728, v: 348, type: "capacitor", angle: 90, front: true },
+
+    // Front face: resistors below the processor.
+    { name: "R39", u: 1069, v: 505, type: "resistor", angle: 90, front: true },
+    { name: "R38", u: 1088, v: 505, type: "resistor", angle: 90, front: true },
+
+    // Front face: filter above the processor.
+    { name: "EM3", u: 1136, v: 205, type: "ferrite", angle: 0, length: 0.19, width: 0.09, front: true },
+
+    // Front face: filter beside the crystal.
+    { name: "EM7", u: 598, v: 429, type: "ferrite", angle: 0, length: 0.17, width: 0.08, front: true },
+
+    // Front face: filters near the speaker area.
+    { name: "EM4", u: 1506, v: 857, type: "ferrite", angle: 90, length: 0.15, width: 0.06, front: true },
+    { name: "EM5", u: 1590, v: 825, type: "ferrite", angle: 90, length: 0.14, width: 0.06, front: true },
+    { name: "EM6", u: 1563, v: 830, type: "ferrite", angle: 90, length: 0.14, width: 0.06, front: true }
   ];
 
   for (const settingsItem of settings) {
@@ -1675,6 +1787,12 @@ function addPcbSurfaceComponents(board, thickness) {
 
     if (settingsItem.type === "resistor") {
       height = 0.028;
+      bodyMaterial = resistorMaterial;
+    }
+
+    // Ferrite filters use a thicker dark body.
+    if (settingsItem.type === "ferrite") {
+      height = 0.06;
       bodyMaterial = resistorMaterial;
     }
 
@@ -1711,30 +1829,37 @@ function addPcbSurfaceComponents(board, thickness) {
       component.add(terminal);
     }
 
-    const point = pcbPoint(
-      2006 - settingsItem.u,
-      settingsItem.v + 10
-    );
+    // Use the rear face unless the entry explicitly selects the front.
+    let u = 2006 - settingsItem.u;
+    let v = settingsItem.v + 10;
+    let z = -thickness / 2 - 0.004;
+    let offset = rearComponentsOffset;
 
-    component.position.set(
-      point.x,
-      point.y,
-      -thickness / 2 - 0.004
-    );
-
-    // Face outward from the back of the board.
     component.rotation.y = Math.PI;
+
+    if (settingsItem.front) {
+      u = settingsItem.u;
+      v = settingsItem.v;
+      z = thickness / 2 + 0.004;
+      offset = frontComponentsOffset;
+
+      component.rotation.y = 0;
+    }
+
+    const point = pcbPoint(u, v);
+
+    component.position.set(point.x, point.y, z);
     component.rotation.z = THREE.MathUtils.degToRad(
       -settingsItem.angle
     );
 
     board.add(component);
 
-    // Keep the component layout together during the explosion.
+    // Move each face's small components together.
     movableParts.push({
       object: component,
       initialPosition: component.position.clone(),
-      offset: rearComponentsOffset.clone()
+      offset: offset.clone()
     });
   }
 }
@@ -2227,7 +2352,7 @@ async function createCircuitBoard() {
     });
   }
 
-  // Three-terminal packages on the back PCB texture.
+  // Three-terminal packages positioned on their respective PCB textures.
   const threePinSettings = [
     {
       name: "Q2",
@@ -2292,6 +2417,35 @@ async function createCircuitBoard() {
       spanX: 0.176,
       spanY: 0.145,
       angle: 0
+    },
+    // Front face: three-terminal package above the A/B button contacts.
+    {
+      name: "Q9",
+      u: 1591,
+      v: 356,
+      spanX: 0.155,
+      spanY: 0.104,
+      angle: 0,
+      front: true
+    },
+    // Front face: packages beside the Start and Select button area.
+    {
+      name: "Q7",
+      u: 506,
+      v: 645,
+      spanX: 0.18,
+      spanY: 0.14,
+      angle: 90,
+      front: true
+    },
+    {
+      name: "D3",
+      u: 506,
+      v: 754,
+      spanX: 0.17,
+      spanY: 0.145,
+      angle: 90,
+      front: true
     }
   ];
 
@@ -2303,18 +2457,26 @@ async function createCircuitBoard() {
 
     component.name = `pcb_${settings.name}`;
 
-    const point = pcbPoint(
-      2006 - settings.u,
-      settings.v + 10
-    );
-
-    component.position.set(
-      point.x,
-      point.y,
-      -thickness / 2 - 0.004
-    );
+    // Use the rear face unless the entry selects the front.
+    let u = 2006 - settings.u;
+    let v = settings.v + 10;
+    let z = -thickness / 2 - 0.004;
+    let offset = rearComponentsOffset;
 
     component.rotation.y = Math.PI;
+
+    if (settings.front) {
+      u = settings.u;
+      v = settings.v;
+      z = thickness / 2 + 0.004;
+      offset = frontComponentsOffset;
+
+      component.rotation.y = 0;
+    }
+
+    const point = pcbPoint(u, v);
+
+    component.position.set(point.x, point.y, z);
     component.rotation.z = THREE.MathUtils.degToRad(
       -settings.angle
     );
@@ -2324,9 +2486,30 @@ async function createCircuitBoard() {
     movableParts.push({
       object: component,
       initialPosition: component.position.clone(),
-      offset: rearComponentsOffset.clone()
+      offset: offset.clone()
     });
   }
+
+  // Five-terminal package above the front A/B button contacts.
+  const u10 = createFivePinPackage();
+
+  u10.name = "pcb_U10";
+
+  const u10Point = pcbPoint(1646, 368);
+
+  u10.position.set(
+    u10Point.x,
+    u10Point.y,
+    thickness / 2 + 0.004
+  );
+
+  board.add(u10);
+
+  movableParts.push({
+    object: u10,
+    initialPosition: u10.position.clone(),
+    offset: frontComponentsOffset.clone()
+  });
 
   // Add small components before applying the PCB calibration.
   addPcbSurfaceComponents(board, thickness);
