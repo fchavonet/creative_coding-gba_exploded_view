@@ -2041,6 +2041,171 @@ function createShoulderSwitch() {
   return shoulderSwitch;
 }
 
+// Build the detailed jack housing around the fixed cylindrical entrance.
+function createJackHousing() {
+  const housing = new THREE.Group();
+
+  const plasticMaterial = new THREE.MeshStandardMaterial({
+    color: 0x202226,
+    metalness: 0,
+    roughness: 0.68
+  });
+
+  const contactMaterial = new THREE.MeshStandardMaterial({
+    color: 0xb99a60,
+    metalness: 0.8,
+    roughness: 0.4
+  });
+
+  function addBox(width, height, depth, material, x, y, z) {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(width, height, depth),
+      material
+    );
+
+    mesh.position.set(x, y, z);
+    housing.add(mesh);
+  }
+
+  function addContact(points, radius) {
+    const curve = new THREE.CatmullRomCurve3(
+      points.map(([x, y, z]) => new THREE.Vector3(x, y, z)),
+      false,
+      "centripetal"
+    );
+
+    const contact = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 24, radius, 8, false),
+      contactMaterial
+    );
+
+    housing.add(contact);
+  }
+
+  // Floor and walls, preserving clearance around the fixed entrance.
+  addBox(
+    0.755, 0.67, 0.055,
+    plasticMaterial,
+    0.1125, -0.275, 0.0275
+  );
+
+  addBox(
+    0.025, 0.67, 0.60,
+    plasticMaterial,
+    -0.2525, -0.275, 0.355
+  );
+
+  addBox(
+    0.035, 0.67, 0.60,
+    plasticMaterial,
+    0.4725, -0.275, 0.355
+  );
+
+  addBox(
+    0.695, 0.025, 0.60,
+    plasticMaterial,
+    0.1075, 0.0475, 0.355
+  );
+
+  // Continuous closure beneath the raised central cover.
+  addBox(
+    0.755, 0.67, 0.015,
+    plasticMaterial,
+    0.1125, -0.275, 0.6575
+  );
+
+  addBox(
+    0.65, 0.40, 0.025,
+    plasticMaterial,
+    0.12, -0.275, 0.6775
+  );
+
+  // Preserve the molded shoulders of the previous design.
+  for (const x of [-0.195, 0.435]) {
+    addBox(
+      0.025, 0.27, 0.025,
+      plasticMaterial,
+      x, -0.285, 0.6975
+    );
+  }
+
+  // Two copper inserts on the closed front ledge.
+  addBox(
+    0.055, 0.08, 0.008,
+    contactMaterial,
+    -0.165, -0.535, 0.668
+  );
+
+  addBox(
+    0.18, 0.09, 0.008,
+    contactMaterial,
+    0.325, -0.54, 0.668
+  );
+
+  // Rear metal strip attached to the housing.
+  addContact([
+    [-0.18, 0.005, 0.686],
+    [0.10, 0.005, 0.686],
+    [0.41, 0.005, 0.686]
+  ], 0.008);
+
+  // Identical parallel contacts, differing only in their lateral position.
+  const rearContactX = [
+    -0.181149,
+    0.002386,
+    0.410791
+  ];
+
+  for (const x of rearContactX) {
+    addContact([
+      [x, 0.005, 0.686],
+      [x, 0.055, 0.715],
+      [x, 0.135, 0.11],
+      [x, 0.135, 0.012]
+    ], 0.009);
+  }
+
+  // Close the front around the fixed jack tube.
+  const frontShape = new THREE.Shape();
+
+  frontShape.moveTo(-0.265, 0);
+  frontShape.lineTo(0.49, 0);
+  frontShape.lineTo(0.49, 0.665);
+  frontShape.lineTo(-0.265, 0.665);
+  frontShape.closePath();
+
+  const entranceHole = new THREE.Path();
+
+  // Compensate for the housing's lateral shift.
+  entranceHole.absarc(
+    -0.02,
+    0.435,
+    0.213,
+    0,
+    Math.PI * 2,
+    true
+  );
+
+  frontShape.holes.push(entranceHole);
+
+  const frontFace = new THREE.Mesh(
+    new THREE.ExtrudeGeometry(frontShape, {
+      depth: 0.035,
+      bevelEnabled: false,
+      curveSegments: 48,
+      steps: 1
+    }),
+    plasticMaterial
+  );
+
+  frontFace.rotation.x = Math.PI / 2;
+  frontFace.position.y = -0.575;
+
+  housing.add(frontFace);
+
+  return housing;
+}
+
 // Build the compact mechanism beneath the volume wheel.
 function createVolumePotentiometer() {
   const potentiometer = new THREE.Group();
@@ -3006,6 +3171,33 @@ async function createCircuitBoard() {
     object: lcdRibbon,
     initialPosition: lcdRibbon.position.clone(),
     offset: new THREE.Vector3(0.35, 1, 2.55)
+  });
+
+  // Add the housing after PCB calibration.
+  const jackHousing = createJackHousing();
+
+  jackHousing.name = "jack_housing";
+
+  jackHousing.position.set(
+    2.83175473,
+    -1.94115979,
+    -thickness / 2 - 0.004
+  );
+
+  jackHousing.rotation.y = Math.PI;
+  jackHousing.rotation.z = THREE.MathUtils.degToRad(-19);
+
+  // Move the complete housing slightly farther right.
+  // Keep the imported cylindrical entrance fixed.
+  jackHousing.translateX(0.03);
+  jackHousing.translateY(-0.02);
+
+  board.add(jackHousing);
+
+  movableParts.push({
+    object: jackHousing,
+    initialPosition: jackHousing.position.clone(),
+    offset: new THREE.Vector3(0.8, -1.2, -0.2)
   });
 
   return board;
