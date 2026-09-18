@@ -431,6 +431,37 @@ async function loadConsole() {
 
     gltf.scene.add(createScrews());
 
+    // Fit the imported wheel to the PCB footprint and shell opening.
+    const volumeWheel = gltf.scene.getObjectByName("volume");
+
+    if (volumeWheel && volumeWheel.isMesh) {
+      volumeWheel.geometry = volumeWheel.geometry.clone();
+      volumeWheel.geometry.computeBoundingBox();
+
+      const wheelCenter = new THREE.Vector3();
+
+      volumeWheel.geometry.boundingBox.getCenter(wheelCenter);
+
+      // Resize around the original center without changing thickness.
+      volumeWheel.geometry.translate(
+        -wheelCenter.x,
+        -wheelCenter.y,
+        -wheelCenter.z
+      );
+
+      volumeWheel.geometry.scale(2.08, 2.08, 1);
+
+      // Preserve the original outward reach through the shell opening.
+      volumeWheel.geometry.translate(
+        3.68336989,
+        -1.95433447,
+        wheelCenter.z
+      );
+
+      volumeWheel.geometry.computeBoundingBox();
+      volumeWheel.geometry.computeBoundingSphere();
+    }
+
     // Add the circuit board in the model's coordinate system.
     const circuitBoard = await createCircuitBoard();
     gltf.scene.add(circuitBoard);
@@ -500,7 +531,7 @@ async function loadConsole() {
       // Connectors and controls.
       { name: "jack", offset: new THREE.Vector3(0.8, -1.2, -0.2) },
       { name: "link", offset: new THREE.Vector3(0.1, 1.75, 0) },
-      { name: "volume", offset: new THREE.Vector3(1.7, -0.8, -0.1) },
+      { name: "volume", offset: new THREE.Vector3(1.1, -0.65, -1.25) },
       { name: "switch", offset: new THREE.Vector3(-1.8, -0.8, 0) },
       { name: "led", offset: new THREE.Vector3(1.15, 0.5, 5.8) },
 
@@ -2010,6 +2041,109 @@ function createShoulderSwitch() {
   return shoulderSwitch;
 }
 
+// Build the compact mechanism beneath the volume wheel.
+function createVolumePotentiometer() {
+  const potentiometer = new THREE.Group();
+
+  const plasticMaterial = new THREE.MeshStandardMaterial({
+    color: 0x252729,
+    metalness: 0,
+    roughness: 0.75
+  });
+
+  const substrateMaterial = new THREE.MeshStandardMaterial({
+    color: 0x684b35,
+    metalness: 0,
+    roughness: 0.85
+  });
+
+  const metalMaterial = new THREE.MeshStandardMaterial({
+    color: 0xbfc3c7,
+    metalness: 0.85,
+    roughness: 0.35
+  });
+
+  function addBox(width, height, depth, material, x, y, z) {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(width, height, depth),
+      material
+    );
+
+    mesh.position.set(x, y, z);
+    potentiometer.add(mesh);
+  }
+  // Lower support concealed beneath the wheel.
+  addBox(
+    0.64, 0.58, 0.035,
+    substrateMaterial,
+    0, 0, 0.0175
+  );
+
+  // Upper extension carrying the five solder contacts.
+  addBox(
+    0.73, 0.43, 0.035,
+    substrateMaterial,
+    0.005, 0.475, 0.0175
+  );
+
+  // Housing seated directly on the insulating support.
+  addBox(
+    0.60, 0.54, 0.16,
+    plasticMaterial,
+    0, 0, 0.115
+  );
+
+  // Bearing reaches the wheel's inner face.
+  const bearingDepth = 0.04719;
+
+  const bearing = new THREE.Mesh(
+    new THREE.CylinderGeometry(
+      0.35,
+      0.35,
+      bearingDepth,
+      48
+    ),
+    plasticMaterial
+  );
+
+  bearing.rotation.x = Math.PI / 2;
+  bearing.position.set(
+    0,
+    0,
+    0.195 + bearingDepth / 2
+  );
+
+  potentiometer.add(bearing);
+
+  // Contact positions preserve alignment with the measured PCB pads.
+  const terminalPositions = [
+    [-0.296511, 0.579888],
+    [-0.145722, 0.575820],
+    [0.003779, 0.576769],
+    [0.153280, 0.577718],
+    [0.307798, 0.579955]
+  ];
+
+  for (const [x, y] of terminalPositions) {
+    addBox(
+      0.096, 0.26, 0.05,
+      metalMaterial,
+      x, y, 0.025
+    );
+  }
+
+  // Retaining tabs beside the housing.
+  for (const sign of [-1, 1]) {
+    addBox(
+      0.025, 0.14, 0.17,
+      metalMaterial,
+      sign * 0.3125, 0.04, 0.12
+    );
+  }
+
+  return potentiometer;
+}
+
 // Build the PCB-mounted power switch mechanism.
 function createPowerSwitch() {
   const powerSwitch = new THREE.Group();
@@ -2824,6 +2958,37 @@ async function createCircuitBoard() {
     object: powerSwitch,
     initialPosition: powerSwitch.position.clone(),
     offset: new THREE.Vector3(-1.3, -0.5, 0)
+  });
+
+  // Place the mechanism on the revised wheel axis.
+  const volumePotentiometer = createVolumePotentiometer();
+
+  volumePotentiometer.name = "volume_potentiometer";
+
+  const volumePoint = pcbPoint(
+    2006 - 257.602936,
+    927.665770 + 10
+  );
+
+  volumePotentiometer.position.set(
+    volumePoint.x,
+    volumePoint.y,
+    -thickness / 2 - 0.004
+  );
+
+  volumePotentiometer.rotation.y = Math.PI;
+  volumePotentiometer.rotation.z = THREE.MathUtils.degToRad(-16);
+
+  // Shift the entire mechanism down and right, leaving the wheel fixed.
+  volumePotentiometer.translateY(-0.03);
+
+  board.add(volumePotentiometer);
+
+  // Keep the housing and wheel aligned during the explosion.
+  movableParts.push({
+    object: volumePotentiometer,
+    initialPosition: volumePotentiometer.position.clone(),
+    offset: new THREE.Vector3(1.1, -0.65, -0.65)
   });
 
   // Add small components before applying the PCB calibration.
