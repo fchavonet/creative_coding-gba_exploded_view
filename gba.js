@@ -466,6 +466,9 @@ async function loadConsole() {
     const circuitBoard = await createCircuitBoard();
     gltf.scene.add(circuitBoard);
 
+    // Fit the membranes before scaling and centering the complete model.
+    addButtonMembranes(gltf.scene);
+
     gba.add(gltf.scene);
 
     // Restore a silver finish on the battery contacts.
@@ -518,11 +521,9 @@ async function loadConsole() {
       { name: "lens_frame", offset: new THREE.Vector3(-0.55, 0.3, 6.4) },
 
       // Front buttons.
-      { name: "a", offset: new THREE.Vector3(1.65, 0.5, 6.2) },
-      { name: "b", offset: new THREE.Vector3(1.15, 0.25, 6.2) },
+      { name: "a", offset: new THREE.Vector3(1.4, 0.35, 6.2) },
+      { name: "b", offset: new THREE.Vector3(1.4, 0.35, 6.2) },
       { name: "dpad", offset: new THREE.Vector3(-1.65, 0.35, 6.2) },
-      { name: "start_key", offset: new THREE.Vector3(-1.15, -0.7, 6) },
-      { name: "select_key", offset: new THREE.Vector3(-1.15, -0.7, 6) },
 
       // Shoulder buttons.
       { name: "left", offset: new THREE.Vector3(-1.5, 1.3, 1.5) },
@@ -2579,6 +2580,889 @@ function createSpeakerWires(speaker, anchors) {
   speaker.add(group);
 
   return group;
+}
+
+function addButtonMembranes(model) {
+  const silicone = new THREE.MeshLambertMaterial({
+    color: 0xffffff
+  });
+
+  const carbon = new THREE.MeshStandardMaterial({
+    color: 0x242627,
+    metalness: 0,
+    roughness: 1
+  });
+
+  // Match the existing PCB calibration.
+  function point(u, v) {
+    const x = (u - 1000) * 0.00518;
+    const y = (580 - v) * 0.00518 + 0.02;
+
+    return new THREE.Vector2(
+      -0.0385680468
+      + 0.986720407 * x
+      + 0.00269863246 * y
+      + 0.0111197408 * x * y
+      - 0.000674551318 * y * y
+      - 0.00131034960 * x * y * y,
+
+      -0.0162130082
+      + 0.000471694358 * x
+      + 1.06370489 * y
+      + 0.000117643643 * x * y
+      + 0.00425071363 * y * y
+      - 0.000301850031 * x * y * y
+    );
+  }
+
+  function button(name) {
+    const object = model.getObjectByName(name);
+
+    if (!object) {
+      throw new Error(`Missing button for membrane: ${name}`);
+    }
+
+    const bounds = new THREE.Box3().setFromObject(object);
+
+    return {
+      object,
+      center: bounds.getCenter(new THREE.Vector3()),
+      bottom: bounds.min.z
+    };
+  }
+
+  function hole(shape, center, radius) {
+    const path = new THREE.Path();
+
+    path.absarc(
+      center.x,
+      center.y,
+      radius,
+      0,
+      Math.PI * 2,
+      true
+    );
+
+    shape.holes.push(path);
+  }
+
+  function cylinder(group, center, radius, bottom, top, material) {
+    const mesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(
+        radius,
+        radius,
+        top - bottom,
+        40
+      ),
+      material
+    );
+
+    mesh.rotation.x = Math.PI / 2;
+    mesh.position.set(center.x, center.y, (bottom + top) / 2);
+
+    group.add(mesh);
+  }
+
+  // Add a raised, rounded lip just inside the membrane outline.
+  function addMembraneRim(group, shape, plateTop) {
+    const points = shape.getSpacedPoints(512);
+
+    // Remove the duplicated closing point.
+    if (
+      points[0].distanceTo(points[points.length - 1]) < 0.00001
+    ) {
+      points.pop();
+    }
+
+    // Use a consistent winding to determine the inward direction.
+    if (THREE.ShapeUtils.isClockWise(points)) {
+      points.reverse();
+    }
+
+    const inset = 0.022;
+    const halfWidth = 0.016;
+    const halfHeight = 0.024;
+    const centerZ = plateTop + 0.014;
+    const sides = 12;
+
+    const vertices = [];
+    const indices = [];
+
+    for (let i = 0; i < points.length; i++) {
+      const previous = points[
+        (i - 1 + points.length) % points.length
+      ];
+
+      const next = points[(i + 1) % points.length];
+      const tangent = next.clone().sub(previous).normalize();
+
+      const inward = new THREE.Vector2(
+        -tangent.y,
+        tangent.x
+      );
+
+      // Elliptical cross-section, partially embedded in the support.
+      for (let j = 0; j < sides; j++) {
+        const angle = j * Math.PI * 2 / sides;
+        const distance = inset + Math.cos(angle) * halfWidth;
+
+        vertices.push(
+          points[i].x + inward.x * distance,
+          points[i].y + inward.y * distance,
+          centerZ + Math.sin(angle) * halfHeight
+        );
+
+        const nextPoint = (i + 1) % points.length;
+        const nextSide = (j + 1) % sides;
+
+        const a = i * sides + j;
+        const b = nextPoint * sides + j;
+        const c = nextPoint * sides + nextSide;
+        const d = i * sides + nextSide;
+
+        indices.push(a, d, b, b, d, c);
+      }
+    }
+
+    const geometry = new THREE.BufferGeometry();
+
+    geometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(vertices, 3)
+    );
+
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+
+    const rim = new THREE.Mesh(geometry, silicone);
+    rim.name = "membrane_rim";
+
+    group.add(rim);
+  }
+
+  function createPcbFittedPad(name, contacts, offset) {
+    const group = new THREE.Group();
+    group.name = name;
+
+    // The PCB front surface is at Z = 0.016 in model coordinates.
+    const plateBottom = 0.017;
+    const plateTop = 0.127;
+
+    let outline;
+    let mountingHoles;
+    let keyNames;
+
+    if (name === "ab_membrane") {
+      // Follow the PCB silkscreen while leaving its outer edge visible.
+      outline = [
+        [1568, 455],
+        [1669, 410],
+        [1685, 393],
+        [1704, 389],
+        [1724, 393],
+        [1739, 406],
+
+        [1795, 362],
+        [1823, 387],
+        [1840, 384],
+        [1845, 375],
+        [1889, 375],
+        [1915, 387],
+
+        [1915, 425],
+        [1927, 451],
+        [1931, 480],
+        [1926, 509],
+        [1917, 530],
+        [1917, 550],
+        [1899, 565],
+        [1899, 599],
+
+        [1783, 599],
+        [1701, 663],
+        [1676, 640],
+        [1665, 641],
+        [1650, 668],
+
+        [1572, 630],
+        [1569, 619],
+        [1579, 603],
+        [1569, 577],
+        [1562, 553],
+        [1561, 526],
+        [1568, 503],
+        [1580, 483]
+      ];
+
+      mountingHoles = [
+        [1704, 423, 0.12],
+        [1775, 579, 0.085]
+      ];
+
+      keyNames = ["a", "b"];
+    } else {
+      // Start/Select footprint, including the left mounting clearance.
+      outline = [
+        [457, 725],
+        [402, 725],
+        [375, 730],
+        [352, 744],
+        [337, 764],
+        [331, 789],
+        [330, 819],
+        [332, 832],
+
+        [345, 838],
+        [350, 849],
+        [347, 861],
+        [337, 870],
+
+        [334, 889],
+        [342, 918],
+        [359, 944],
+        [383, 961],
+        [411, 976],
+        [450, 978],
+        [464, 972],
+        [469, 959],
+        [467, 744],
+        [465, 731]
+      ];
+
+      mountingHoles = [
+        [405, 949, 0.045]
+      ];
+
+      keyNames = ["start_key", "select_key"];
+    }
+
+    const points = outline.map(([u, v]) => point(u, v));
+    const shape = new THREE.Shape();
+
+    if (name === "ab_membrane") {
+      // Reduce only the outer footprint; preserve button and mounting axes.
+      const center = new THREE.Vector2();
+
+      for (const p of points) {
+        center.add(p);
+      }
+
+      center.divideScalar(points.length);
+
+      for (const p of points) {
+        p.sub(center).multiplyScalar(0.985).add(center);
+      }
+
+      // Small rounded corners preserve the PCB outline's overall shape.
+      const corners = points.map((current, index) => {
+        const previous = points[
+          (index - 1 + points.length) % points.length
+        ];
+
+        const next = points[(index + 1) % points.length];
+
+        const towardPrevious = previous.clone().sub(current);
+        const towardNext = next.clone().sub(current);
+
+        const distance = Math.min(
+          0.035,
+          towardPrevious.length() * 0.4,
+          towardNext.length() * 0.4
+        );
+
+        const entry = current.clone().add(
+          towardPrevious.normalize().multiplyScalar(distance)
+        );
+
+        const exit = current.clone().add(
+          towardNext.normalize().multiplyScalar(distance)
+        );
+
+        return { current, entry, exit };
+      });
+
+      shape.moveTo(corners[0].entry.x, corners[0].entry.y);
+
+      for (let i = 0; i < corners.length; i++) {
+        const corner = corners[i];
+        const next = corners[(i + 1) % corners.length];
+
+        shape.quadraticCurveTo(
+          corner.current.x,
+          corner.current.y,
+          corner.exit.x,
+          corner.exit.y
+        );
+
+        shape.lineTo(next.entry.x, next.entry.y);
+      }
+    } else {
+      // Trace Start/Select with continuous curves instead of polygonal corners.
+      function move(u, v) {
+        const p = point(u, v);
+        shape.moveTo(p.x, p.y);
+      }
+
+      function line(u, v) {
+        const p = point(u, v);
+        shape.lineTo(p.x, p.y);
+      }
+
+      function curve(u1, v1, u2, v2, u3, v3) {
+        const a = point(u1, v1);
+        const b = point(u2, v2);
+        const c = point(u3, v3);
+
+        shape.bezierCurveTo(
+          a.x, a.y,
+          b.x, b.y,
+          c.x, c.y
+        );
+      }
+
+      move(457, 725);
+      line(402, 725);
+
+      // Rounded upper-left shoulder.
+      curve(361, 725, 332, 746, 331, 789);
+      line(330, 819);
+
+      // Smooth clearance around the left mounting position.
+      curve(330, 833, 350, 832, 350, 849);
+      curve(350, 862, 337, 866, 334, 879);
+
+      // Follow the lower-left PCB curve, then the straight bottom edge.
+      curve(329, 925, 350, 972, 400, 976);
+      line(450, 976);
+      curve(460, 976, 467, 969, 467, 959);
+
+      // Straight right edge with a rounded upper corner.
+      line(467, 744);
+      curve(467, 732, 466, 725, 457, 725);
+    }
+
+    shape.closePath();
+
+    for (const [u, v, radius] of mountingHoles) {
+      hole(shape, point(u, v), radius);
+    }
+
+    // Thicker silicone support seated immediately above the PCB.
+    const plateGeometry = new THREE.ExtrudeGeometry(shape, {
+      depth: plateTop - plateBottom,
+      bevelEnabled: false,
+      curveSegments: 32
+    });
+
+    plateGeometry.translate(0, 0, plateBottom);
+
+    group.add(new THREE.Mesh(plateGeometry, silicone));
+
+    addMembraneRim(group, shape, plateTop);
+
+    for (let i = 0; i < contacts.length; i++) {
+      const contact = contacts[i];
+      const key = button(keyNames[i]);
+
+      const center = new THREE.Vector2(
+        key.center.x,
+        key.center.y
+      );
+
+      // Slight overlap avoids a visible seam beneath the existing button.
+      const height = key.bottom + 0.001;
+
+      let radius = contact.radius;
+      let capRadius = 0.22;
+
+      if (name === "start_select_membrane") {
+        // Fit the narrow PCB footprint without moving the external keys.
+        radius = 0.16;
+        capRadius = 0.145;
+      }
+
+      // Continuous molded support sharing the button's exact axis.
+      const profile = [
+        [0, plateTop - 0.002],
+        [radius, plateTop - 0.002],
+        [radius, plateTop + 0.015],
+        [radius * 0.94, plateTop + 0.04],
+        [capRadius, plateTop + 0.085],
+        [capRadius, height - 0.012],
+        [capRadius * 0.97, height],
+        [0, height]
+      ].map(([r, z]) => {
+        return new THREE.Vector2(r, z);
+      });
+
+      const actuator = new THREE.Mesh(
+        new THREE.LatheGeometry(profile, 64),
+        silicone
+      );
+
+      actuator.rotation.x = Math.PI / 2;
+      actuator.position.set(center.x, center.y, 0);
+
+      group.add(actuator);
+
+      // Conductive underside, immediately above the PCB surface.
+      cylinder(
+        group,
+        center,
+        radius * 0.60,
+        0.0165,
+        0.020,
+        carbon
+      );
+    }
+
+    model.add(group);
+
+    movableParts.push({
+      object: group,
+      initialPosition: group.position.clone(),
+      offset
+    });
+
+    return group;
+  }
+
+  function createPad(name, outline, mountingHoles, contacts, offset) {
+    // Use the PCB-fitted construction for A/B and Start/Select.
+    if (
+      name === "ab_membrane" ||
+      name === "start_select_membrane"
+    ) {
+      return createPcbFittedPad(name, contacts, offset);
+    }
+
+    const group = new THREE.Group();
+    group.name = name;
+
+    // Bring the compact membrane closer to the existing buttons.
+    let lift = 0;
+
+    if (name === "ab_membrane") {
+      lift = 0.10;
+    }
+
+    if (name === "start_select_membrane") {
+      lift = 0.22;
+    }
+
+    let points = outline.map(([u, v]) => point(u, v));
+    let referencePoint = null;
+    let referenceScale = 1;
+
+    // Fit the photographed A/B outline to the existing button axes.
+    if (name === "ab_membrane") {
+      const centerA = contacts[0].base;
+      const centerB = contacts[1].base;
+
+      // Reference image: B center (716, 464), A center (950, 464).
+      const axisX = (centerA.x - centerB.x) / 234;
+      const axisY = (centerA.y - centerB.y) / 234;
+
+      referenceScale = Math.hypot(axisX, axisY);
+
+      referencePoint = function (u, v) {
+        const x = u - 716;
+        const y = 464 - v;
+
+        return new THREE.Vector2(
+          centerB.x + x * axisX - y * axisY,
+          centerB.y + x * axisY + y * axisX
+        );
+      };
+
+      points = outline.map(([u, v]) => referencePoint(u, v));
+    }
+
+    // Build Start/Select directly around the two existing key axes.
+    if (name === "start_select_membrane") {
+      const cx = (contacts[0].base.x + contacts[1].base.x) / 2;
+      const upper = Math.max(
+        contacts[0].base.y,
+        contacts[1].base.y
+      );
+      const lower = Math.min(
+        contacts[0].base.y,
+        contacts[1].base.y
+      );
+
+      points = [
+        new THREE.Vector2(cx - 0.27, upper + 0.26),
+        new THREE.Vector2(cx + 0.27, upper + 0.26),
+        new THREE.Vector2(cx + 0.30, upper),
+        new THREE.Vector2(cx + 0.30, lower),
+        new THREE.Vector2(cx + 0.24, lower - 0.26),
+        new THREE.Vector2(cx - 0.24, lower - 0.26),
+        new THREE.Vector2(cx - 0.30, lower),
+        new THREE.Vector2(cx - 0.30, upper)
+      ];
+    }
+
+    const shape = new THREE.Shape();
+    const last = points[points.length - 1];
+
+    shape.moveTo(
+      (last.x + points[0].x) / 2,
+      (last.y + points[0].y) / 2
+    );
+
+    for (let i = 0; i < points.length; i++) {
+      const current = points[i];
+      const next = points[(i + 1) % points.length];
+
+      shape.quadraticCurveTo(
+        current.x,
+        current.y,
+        (current.x + next.x) / 2,
+        (current.y + next.y) / 2
+      );
+    }
+
+    shape.closePath();
+
+    // Keep the mounting holes tied to the PCB reference.
+    for (const [u, v, radius] of mountingHoles) {
+      if (referencePoint) {
+        hole(
+          shape,
+          referencePoint(u, v),
+          radius * referenceScale
+        );
+      } else {
+        hole(shape, point(u, v), radius);
+      }
+    }
+
+    const plateGeometry = new THREE.ExtrudeGeometry(shape, {
+      depth: 0.11,
+      bevelEnabled: false,
+      curveSegments: 32
+    });
+
+    plateGeometry.translate(0, 0, 0.017);
+    group.add(new THREE.Mesh(plateGeometry, silicone));
+
+// Match the raised border used on the other membranes.
+addMembraneRim(group, shape, 0.127);
+
+    for (const contact of contacts) {
+      const r = contact.radius;
+
+      // Keep the support seated on the PCB.
+      const plateTop = 0.127;
+
+      // Extend the rubber reliefs to the underside of the D-pad.
+      const contactTop = button("dpad").bottom + 0.001;
+
+      const profile = [
+        [0, plateTop - 0.003],
+        [r, plateTop - 0.003],
+        [r, plateTop + 0.012],
+        [r * 0.94, plateTop + 0.032],
+        [r * 0.76, plateTop + 0.060],
+        [r * 0.67, contactTop - 0.025],
+        [r * 0.64, contactTop],
+        [0, contactTop]
+      ].map(([radius, height]) => {
+        return new THREE.Vector2(radius, height);
+      });
+
+      const relief = new THREE.Mesh(
+        new THREE.LatheGeometry(profile, 64),
+        silicone
+      );
+
+      relief.rotation.x = Math.PI / 2;
+      relief.position.set(contact.base.x, contact.base.y, 0);
+
+      group.add(relief);
+
+      // Conductive pills remain exposed beneath the thicker support.
+      cylinder(
+        group,
+        contact.base,
+        r * 0.60,
+        0.0165,
+        0.020,
+        carbon
+      );
+
+      // Short straight neck, concentric with the existing rubber key.
+      if (name === "start_select_membrane") {
+        cylinder(
+          group,
+          contact.base,
+          0.145,
+          0.185,
+          contact.height - lift,
+          silicone
+        );
+      }
+    }
+
+    // Raised collar around the D-pad pivot opening.
+    if (name === "dpad_membrane") {
+      const center = point(264, 512);
+
+      const profile = [
+        new THREE.Vector2(0.12, 0.10),
+        new THREE.Vector2(0.12, 0.165),
+        new THREE.Vector2(0.16, 0.165),
+        new THREE.Vector2(0.19, 0.105),
+        new THREE.Vector2(0.12, 0.10)
+      ];
+
+      const collar = new THREE.Mesh(
+        new THREE.LatheGeometry(profile.reverse(), 48),
+        silicone
+      );
+
+      collar.rotation.x = Math.PI / 2;
+      collar.position.set(center.x, center.y, 0);
+
+      group.add(collar);
+    }
+
+    // Shift the generated parts before attaching the original keys.
+    group.traverse((child) => {
+      if (child.isMesh) {
+        child.position.z += lift;
+      }
+    });
+
+    model.add(group);
+
+    movableParts.push({
+      object: group,
+      initialPosition: group.position.clone(),
+      offset
+    });
+
+    return group;
+  }
+
+  const a = button("a");
+  const b = button("b");
+  const start = button("start_key");
+  const select = button("select_key");
+
+  // Position the rubber contacts from the actual D-pad geometry.
+  const dpadButton = button("dpad");
+  const dpadBounds = new THREE.Box3().setFromObject(
+    dpadButton.object
+  );
+
+  const dpadCenter = dpadBounds.getCenter(new THREE.Vector3());
+
+  // Slightly reduce the radius to keep the four bases separate.
+  const dpadContactRadius = 0.26;
+
+  const dpadContacts = [
+    {
+      base: new THREE.Vector2(
+        dpadCenter.x,
+        dpadBounds.max.y - dpadContactRadius
+      ),
+      radius: dpadContactRadius
+    },
+    {
+      base: new THREE.Vector2(
+        dpadBounds.min.x + dpadContactRadius,
+        dpadCenter.y
+      ),
+      radius: dpadContactRadius
+    },
+    {
+      base: new THREE.Vector2(
+        dpadBounds.max.x - dpadContactRadius,
+        dpadCenter.y
+      ),
+      radius: dpadContactRadius
+    },
+    {
+      base: new THREE.Vector2(
+        dpadCenter.x,
+        dpadBounds.min.y + dpadContactRadius
+      ),
+      radius: dpadContactRadius
+    }
+  ];
+
+  // Move each contact farther from the center of the D-pad.
+  const dpadContactSpread = 0.18;
+
+  dpadContacts[0].base.y += dpadContactSpread + 0.05;
+  dpadContacts[1].base.x -= dpadContactSpread;
+  dpadContacts[2].base.x += dpadContactSpread + 0.02;
+  dpadContacts[3].base.y -= dpadContactSpread + 0.05;
+
+  createPad(
+    "dpad_membrane",
+    [
+      [264, 324],
+      [305, 325],
+      [330, 323],
+
+      // Upper mounting ear.
+      [335, 294],
+      [355, 278],
+      [377, 280],
+      [392, 301],
+      [386, 325],
+      [385, 354],
+
+      // Circular body.
+      [437, 417],
+      [459, 530],
+      [435, 625],
+      [375, 679],
+      [303, 702],
+      [280, 700],
+
+      // Lower mounting ear.
+      [274, 734],
+      [248, 741],
+      [224, 727],
+      [224, 706],
+
+      [166, 679],
+      [110, 623],
+      [94, 528],
+      [100, 428],
+      [164, 350]
+    ],
+    [
+      // Central pivot opening.
+      [264, 512, 0.12],
+
+      // The two mounting holes indicated on the PCB.
+      [365, 302, 0.075],
+      [249, 720, 0.07]
+    ],
+    dpadContacts,
+    new THREE.Vector3(-1.65, 0.35, 2.7)
+  );
+
+  // A/B axes come from the buttons; the perimeter accommodates the PCB.
+  createPad(
+    "ab_membrane",
+    [
+      // Left edge and lower-left locating tab.
+      [590, 530],
+      [608, 507],
+      [599, 478],
+      [605, 438],
+      [624, 405],
+      [649, 380],
+
+      // Upper-left shoulder.
+      [650, 349],
+      [660, 334],
+      [745, 325],
+
+      // Large mounting-hole surround.
+      [781, 312],
+      [806, 310],
+      [831, 320],
+      [844, 345],
+      [861, 354],
+
+      // Upper notch between the two right-hand shoulders.
+      [904, 331],
+      [927, 326],
+      [940, 335],
+      [944, 349],
+      [959, 360],
+      [974, 352],
+      [989, 336],
+      [1007, 338],
+
+      // Upper-right locating tab.
+      [1037, 366],
+      [1064, 397],
+      [1074, 409],
+      [1070, 425],
+      [1054, 439],
+
+      // Rounded right side.
+      [1062, 470],
+      [1050, 509],
+      [1030, 540],
+      [1000, 562],
+      [969, 577],
+
+      // Lower-right shoulder.
+      [956, 600],
+      [944, 611],
+      [898, 598],
+      [850, 583],
+      [822, 580],
+
+      // Lower bridge and left notch.
+      [778, 596],
+      [734, 609],
+      [713, 611],
+      [699, 590],
+      [685, 579],
+      [671, 588],
+      [657, 594],
+      [642, 585],
+      [613, 556]
+    ],
+    [
+      // Hole coordinates and radii in the reference image.
+      [808, 352, 27],
+      [830, 548, 11]
+    ],
+    [
+      {
+        base: new THREE.Vector2(a.center.x, a.center.y),
+        radius: 0.29
+      },
+      {
+        base: new THREE.Vector2(b.center.x, b.center.y),
+        radius: 0.29
+      }
+    ],
+    new THREE.Vector3(1.4, 0.35, 2.7)
+  );
+
+  // One coherent Start/Select part, centered on the shell openings.
+  const startSelect = createPad(
+    "start_select_membrane",
+    [],
+    [],
+    [
+      {
+        base: new THREE.Vector2(start.center.x, start.center.y),
+        radius: 0.22,
+        height: start.bottom + 0.005
+      },
+      {
+        base: new THREE.Vector2(select.center.x, select.center.y),
+        radius: 0.22,
+        height: select.bottom + 0.005
+      }
+    ],
+    new THREE.Vector3(-1.15, -0.7, 3.2)
+  );
+
+  // Preserve the exact assembled position of the original key surfaces.
+  model.updateMatrixWorld(true);
+
+  for (const key of [start.object, select.object]) {
+    startSelect.attach(key);
+
+    key.traverse((child) => {
+      if (child.isMesh) {
+        child.material = silicone;
+      }
+    });
+  }
 }
 
 // Build the textured circuit board and its main chips.
