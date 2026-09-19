@@ -387,6 +387,182 @@ function createScrews() {
   return screws;
 }
 
+// Load one battery model and fit two copies between the contacts.
+async function addBatteries(model) {
+  const batteryGltf = await loader.loadAsync("./assets/battery.glb");
+  const source = batteryGltf.scene;
+
+  // The exported battery has its positive terminal along local +Y.
+  const bounds = new THREE.Box3().setFromObject(source);
+  const size = bounds.getSize(new THREE.Vector3());
+  const center = bounds.getCenter(new THREE.Vector3());
+
+  source.position.sub(center);
+
+  // Improve the embedded label texture at oblique viewing angles.
+  source.traverse((object) => {
+    if (!object.isMesh) {
+      return;
+    }
+
+    let materials = [object.material];
+
+    if (Array.isArray(object.material)) {
+      materials = object.material;
+    }
+
+    for (const material of materials) {
+      if (material.map) {
+        material.map.anisotropy =
+          renderer.capabilities.getMaxAnisotropy();
+
+        material.map.needsUpdate = true;
+      }
+    }
+  });
+
+  // Apply chrome only to the metallic end-cap UV regions.
+  const chromeMaterial = new THREE.MeshStandardMaterial({
+    color: 0xd9dde1,
+    metalness: 1,
+    roughness: 0.22,
+    envMapIntensity: 1
+  });
+
+  source.traverse((object) => {
+    if (!object.isMesh) {
+      return;
+    }
+
+    const geometry = object.geometry.clone();
+    const uv = geometry.getAttribute("uv");
+
+    if (!uv) {
+      return;
+    }
+
+    const index = geometry.getIndex();
+
+    let count = geometry.getAttribute("position").count;
+
+    if (index) {
+      count = index.count;
+    }
+
+    // Preserve the printed label while adding a metallic finish.
+    const bodyMaterial = object.material.clone();
+
+    bodyMaterial.metalness = 0.9;
+    bodyMaterial.roughness = 0.18;
+    bodyMaterial.envMapIntensity = 1.3;
+    bodyMaterial.needsUpdate = true;
+
+    geometry.clearGroups();
+
+    let groupStart = 0;
+    let previousMaterial = -1;
+
+    for (let i = 0; i < count; i += 3) {
+      let u = 0;
+      let v = 0;
+
+      for (let corner = 0; corner < 3; corner++) {
+        let vertex = i + corner;
+
+        if (index) {
+          vertex = index.getX(vertex);
+        }
+
+        u += uv.getX(vertex);
+        v += uv.getY(vertex);
+      }
+
+      u /= 3;
+      v /= 3;
+
+      let materialIndex = 0;
+
+      // Silver discs occupy the upper-right area of this specific atlas.
+      if (u > 0.59 && v < 0.45) {
+        materialIndex = 1;
+      }
+
+      if (materialIndex !== previousMaterial) {
+        if (previousMaterial !== -1) {
+          geometry.addGroup(
+            groupStart,
+            i - groupStart,
+            previousMaterial
+          );
+        }
+
+        groupStart = i;
+        previousMaterial = materialIndex;
+      }
+    }
+
+    if (previousMaterial !== -1) {
+      geometry.addGroup(
+        groupStart,
+        count - groupStart,
+        previousMaterial
+      );
+    }
+
+    object.geometry = geometry;
+    object.material = [bodyMaterial, chromeMaterial];
+  });
+
+  const diameter = 1.04;
+
+  const placements = [
+    {
+      name: "battery_upper",
+      position: new THREE.Vector3(-0.20, -0.89, -0.58),
+      length: 3.75,
+      angle: Math.PI / 2,
+      offset: new THREE.Vector3(0.3, -0.2, -5)
+    },
+    {
+      name: "battery_lower",
+      position: new THREE.Vector3(0.21, -2.09, -0.58),
+      length: 3.72,
+      angle: -Math.PI / 2,
+      offset: new THREE.Vector3(0.3, -0.2, -5)
+    }
+  ];
+
+  for (const placement of placements) {
+    const battery = new THREE.Group();
+    battery.name = placement.name;
+
+    // Separate sizing from placement and explosion movement.
+    const fittedModel = new THREE.Group();
+
+    fittedModel.add(source.clone(true));
+
+    fittedModel.scale.set(
+      diameter / size.x,
+      placement.length / size.y,
+      diameter / size.z
+    );
+
+    // Upper positive terminal faces left; lower faces right.
+    fittedModel.rotation.z = placement.angle;
+
+    battery.add(fittedModel);
+    battery.position.copy(placement.position);
+
+    model.add(battery);
+
+    movableParts.push({
+      object: battery,
+      initialPosition: battery.position.clone(),
+      offset: placement.offset.clone()
+    });
+  }
+}
+
 async function loadConsole() {
   try {
     const gltf = await loader.loadAsync("./assets/gba.glb");
@@ -468,6 +644,9 @@ async function loadConsole() {
 
     // Fit the membranes before scaling and centering the complete model.
     addButtonMembranes(gltf.scene);
+
+    // Install both batteries before measuring the complete model.
+    await addBatteries(gltf.scene);
 
     gba.add(gltf.scene);
 
