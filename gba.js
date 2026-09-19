@@ -2407,6 +2407,180 @@ function createPowerSwitch() {
   return powerSwitch;
 }
 
+function createSpeaker() {
+  const speaker = new THREE.Group();
+  speaker.name = "speaker";
+
+  const frame = new THREE.MeshStandardMaterial({
+    color: 0x272c2b,
+    metalness: 0.65,
+    roughness: 0.4
+  });
+
+  const membrane = new THREE.MeshStandardMaterial({
+    color: 0x29443f,
+    metalness: 0.25,
+    roughness: 0.55,
+    side: THREE.DoubleSide
+  });
+
+  const silver = new THREE.MeshStandardMaterial({
+    color: 0xb6b8ac,
+    metalness: 0.85,
+    roughness: 0.32
+  });
+
+  const brass = new THREE.MeshStandardMaterial({
+    color: 0xb49a56,
+    metalness: 0.75,
+    roughness: 0.38
+  });
+
+  function cylinder(radius, depth, z, material) {
+    const mesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius, radius, depth, 64),
+      material
+    );
+
+    mesh.rotation.x = Math.PI / 2;
+    mesh.position.z = z;
+
+    speaker.add(mesh);
+  }
+
+  function ring(radius, tube, z, material) {
+    const mesh = new THREE.Mesh(
+      new THREE.TorusGeometry(radius, tube, 12, 64),
+      material
+    );
+
+    mesh.position.z = z;
+
+    speaker.add(mesh);
+  }
+
+  function surface(profile, material) {
+    const points = profile.map(([radius, height]) => {
+      return new THREE.Vector2(radius, height);
+    });
+
+    const mesh = new THREE.Mesh(
+      new THREE.LatheGeometry(points.reverse(), 64),
+      material
+    );
+
+    mesh.rotation.x = Math.PI / 2;
+
+    speaker.add(mesh);
+  }
+
+  // Rear basket and rolled outer edge.
+  cylinder(0.39, 0.035, 0.018, silver);
+  cylinder(0.78, 0.10, 0.075, frame);
+
+  ring(0.775, 0.035, 0.145, frame);
+  ring(0.73, 0.012, 0.145, silver);
+
+  // Suspension and recessed diaphragm.
+  surface([
+    [0.35, 0.125],
+    [0.43, 0.12],
+    [0.60, 0.14],
+    [0.65, 0.17],
+    [0.68, 0.18],
+    [0.71, 0.16],
+    [0.73, 0.145]
+  ], membrane);
+
+  ring(0.35, 0.025, 0.14, brass);
+
+  // Shallow central dome.
+  surface([
+    [0, 0.255],
+    [0.07, 0.253],
+    [0.15, 0.24],
+    [0.23, 0.21],
+    [0.29, 0.17],
+    [0.32, 0.14]
+  ], silver);
+
+  // Two solder terminals on the speaker rim.
+  for (const [x, y] of [[0.58, 0.40], [0.65, 0.26]]) {
+    const terminal = new THREE.Mesh(
+      new THREE.BoxGeometry(0.085, 0.07, 0.02),
+      brass
+    );
+
+    terminal.position.set(x, y, 0.205);
+
+    speaker.add(terminal);
+  }
+
+  return speaker;
+}
+
+function createSpeakerWires(speaker, anchors) {
+  const group = new THREE.Group();
+  group.name = "speaker_wires";
+
+  const colors = [0xc4c3b6, 0x858983];
+
+  const terminals = [
+    new THREE.Vector3(0.58, 0.40, 0.22),
+    new THREE.Vector3(0.65, 0.26, 0.22)
+  ];
+
+  const origin = speaker.position.clone();
+
+  for (let i = 0; i < terminals.length; i++) {
+    const start = terminals[i].clone().add(origin);
+    const edgeY = -0.78 - i * 0.20;
+
+    // Lift the wire above the diaphragm before crossing the rim.
+    const departure = start.clone().add(
+      new THREE.Vector3(0.12, 0.04, 0.07)
+    );
+
+    const points = [
+      start,
+      departure,
+      new THREE.Vector3(4.65, edgeY, 0.30),
+      new THREE.Vector3(4.87, edgeY + 0.08, 0.10),
+      new THREE.Vector3(4.84, edgeY + 0.10, -0.14),
+      anchors[i].clone().add(
+        new THREE.Vector3(0.10, 0, -0.08)
+      ),
+      anchors[i].clone()
+    ];
+
+    // Convert PCB coordinates to the speaker's local coordinates.
+    for (const point of points) {
+      point.sub(origin);
+    }
+
+    const curve = new THREE.CatmullRomCurve3(
+      points,
+      false,
+      "centripetal"
+    );
+
+    const wire = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 48, 0.017, 8, false),
+      new THREE.MeshStandardMaterial({
+        color: colors[i],
+        roughness: 0.8
+      })
+    );
+
+    group.add(wire);
+  }
+
+  // Preserve the wire shape throughout the exploded view.
+  speaker.add(group);
+
+  return group;
+}
+
 // Build the textured circuit board and its main chips.
 async function createCircuitBoard() {
   const board = new THREE.Group();
@@ -3159,6 +3333,35 @@ async function createCircuitBoard() {
   // Add small components before applying the PCB calibration.
   addPcbSurfaceComponents(board, thickness);
 
+  // Place the SP1 solder joints before PCB calibration.
+  const speakerAnchors = [];
+
+  const solderMaterial = new THREE.MeshStandardMaterial({
+    color: 0xb8b8b0,
+    metalness: 0.8,
+    roughness: 0.4
+  });
+
+  for (const [u, v] of [[135, 706], [137, 756]]) {
+    const point = pcbPoint(2006 - u, v + 10);
+
+    const anchor = new THREE.Mesh(
+      new THREE.SphereGeometry(0.035, 16, 8),
+      solderMaterial
+    );
+
+    anchor.scale.z = 0.4;
+
+    anchor.position.set(
+      point.x,
+      point.y,
+      -thickness / 2 - 0.006
+    );
+
+    board.add(anchor);
+    speakerAnchors.push(anchor);
+  }
+
   // Align the completed board, including its components and markings.
   alignCircuitBoard(board);
 
@@ -3199,6 +3402,25 @@ async function createCircuitBoard() {
     initialPosition: jackHousing.position.clone(),
     offset: new THREE.Vector3(0.8, -1.2, -0.2)
   });
+
+  // Add the speaker after calibration to preserve its circular shape.
+  const speaker = createSpeaker();
+
+  speaker.position.set(3.737, -1.508, 0.08);
+
+  board.add(speaker);
+
+  movableParts.push({
+    object: speaker,
+    initialPosition: speaker.position.clone(),
+    offset: new THREE.Vector3(1.5, -0.8, 2.4)
+  });
+
+  // Attach the fixed-shape wires to the speaker.
+  createSpeakerWires(
+    speaker,
+    speakerAnchors.map((anchor) => anchor.position.clone())
+  );
 
   return board;
 }
