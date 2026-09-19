@@ -18,7 +18,8 @@ const camera = new THREE.PerspectiveCamera(
   100
 );
 
-camera.position.z = 5;
+// Start slightly above the console, looking from its right side.
+camera.position.set(2.5, 1.5, 4.6);
 
 // Renderer.
 const renderer = new THREE.WebGLRenderer({
@@ -56,6 +57,11 @@ controls.enablePan = false;
 
 controls.minDistance = 3;
 controls.maxDistance = 12;
+
+// Aim the initial view at the centered console.
+controls.target.set(0, 0, 0);
+controls.update();
+controls.saveState();
 
 // General lighting.
 const hemisphereLight = new THREE.HemisphereLight(
