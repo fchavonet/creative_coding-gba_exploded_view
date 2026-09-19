@@ -593,6 +593,72 @@ function configureScreenLens(model) {
     });
   }
 
+  // Mask the gap between the printed frame and the LCD.
+  const borderMaterial = new THREE.MeshStandardMaterial({
+    color: 0x191919,
+    metalness: 0,
+    roughness: 0.85,
+    envMapIntensity: 0
+  });
+
+  function roundedRectangle(left, bottom, right, top, radius) {
+    const path = new THREE.Path();
+
+    path.moveTo(left + radius, bottom);
+    path.lineTo(right - radius, bottom);
+    path.quadraticCurveTo(right, bottom, right, bottom + radius);
+
+    path.lineTo(right, top - radius);
+    path.quadraticCurveTo(right, top, right - radius, top);
+
+    path.lineTo(left + radius, top);
+    path.quadraticCurveTo(left, top, left, top - radius);
+
+    path.lineTo(left, bottom + radius);
+    path.quadraticCurveTo(left, bottom, left + radius, bottom);
+
+    path.closePath();
+
+    return path;
+  }
+
+  // Dimensions measured from the model's screen opening.
+  const outer = roundedRectangle(
+    -2.38833, -1.39512,
+    2.39183, 1.95459,
+    0.055
+  );
+
+  const inner = roundedRectangle(
+    -2.32333, -1.33012,
+    2.32683, 1.88959,
+    0.035
+  );
+
+  const borderShape = new THREE.Shape();
+  borderShape.curves = outer.curves;
+  borderShape.holes.push(inner);
+
+  const borderGeometry = new THREE.ExtrudeGeometry(
+    borderShape,
+    {
+      depth: 0.10,
+      bevelEnabled: false,
+      curveSegments: 24
+    }
+  );
+
+  // End just behind the printed frame at Z = 0.55.
+  borderGeometry.translate(0, 0, 0.449);
+
+  const innerBorder = new THREE.Mesh(
+    borderGeometry,
+    borderMaterial
+  );
+
+  innerBorder.name = "screen_inner_border";
+  frame.add(innerBorder);
+
   // Clear glass with sharp, restrained reflections.
   if (glass && glass.isMesh) {
     glass.material = new THREE.MeshPhysicalMaterial({
@@ -3146,8 +3212,8 @@ function addButtonMembranes(model) {
     plateGeometry.translate(0, 0, 0.017);
     group.add(new THREE.Mesh(plateGeometry, silicone));
 
-// Match the raised border used on the other membranes.
-addMembraneRim(group, shape, 0.127);
+    // Match the raised border used on the other membranes.
+    addMembraneRim(group, shape, 0.127);
 
     for (const contact of contacts) {
       const r = contact.radius;
