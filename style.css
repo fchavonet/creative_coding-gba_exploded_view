@@ -11,3 +11,7 @@
 .tooltip::after {
     display: none !important;
 }
+
+#model-loading[hidden] {
+    display: none;
+}

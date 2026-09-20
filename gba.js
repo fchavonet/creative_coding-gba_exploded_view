@@ -4,6 +4,17 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
+// Show the spinner until the console is ready.
+const loadingPanel = document.getElementById("model-loading");
+
+function nextFrame() {
+  return new Promise((resolve) => requestAnimationFrame(resolve));
+}
+
+// Allow the browser to paint the loading indicator before setup work.
+await nextFrame();
+await nextFrame();
+
 // Container.
 const stage = document.getElementById("stage");
 
@@ -32,6 +43,9 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
 stage.appendChild(renderer.domElement);
 
+const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
+let renderRequested = true;
+
 // Environment lighting for metallic reflections.
 const roomEnvironment = new RoomEnvironment();
 const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -49,6 +63,11 @@ pmremGenerator.dispose();
 
 // Camera controls.
 const controls = new OrbitControls(camera, renderer.domElement);
+
+controls.enabled = false;
+controls.addEventListener("change", () => {
+  renderRequested = true;
+});
 
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
@@ -115,6 +134,10 @@ spreadSlider.addEventListener("input", updateExplosion);
 
 // Smoothly move the parts toward the target.
 function animateExplosion(deltaTime) {
+  if (explosionProgress === explosionTarget) {
+    return false;
+  }
+
   const smoothing = 1 - Math.exp(-explosionSpeed * deltaTime);
 
   explosionProgress += (
@@ -133,6 +156,8 @@ function animateExplosion(deltaTime) {
       explosionProgress
     );
   }
+
+  return true;
 }
 
 // Shell visibility.
@@ -140,6 +165,7 @@ const hideShellCheckbox = document.getElementById("hide-shell");
 const shellParts = [];
 
 function updateShellVisibility() {
+  renderRequested = true;
   const visible = !hideShellCheckbox.checked;
 
   for (const part of shellParts) {
@@ -394,8 +420,7 @@ function createScrews() {
 }
 
 // Load one battery model and fit two copies between the contacts.
-async function addBatteries(model) {
-  const batteryGltf = await loader.loadAsync("./assets/battery.glb");
+function addBatteries(model, batteryGltf) {
   const source = batteryGltf.scene;
 
   // The exported battery has its positive terminal along local +Y.
@@ -420,7 +445,7 @@ async function addBatteries(model) {
     for (const material of materials) {
       if (material.map) {
         material.map.anisotropy =
-          renderer.capabilities.getMaxAnisotropy();
+          maxAnisotropy;
 
         material.map.needsUpdate = true;
       }
@@ -571,7 +596,18 @@ async function addBatteries(model) {
 
 async function loadConsole() {
   try {
-    const gltf = await loader.loadAsync("./assets/gba.glb");
+    const textureLoader = new THREE.TextureLoader();
+
+    // Start all independent asset downloads together.
+    const [gltf, batteryGltf, frontTexture, backTexture] = await Promise.all([
+      loader.loadAsync("./assets/gba.glb"),
+      loader.loadAsync("./assets/battery.glb"),
+      textureLoader.loadAsync("./assets/pcb-front.png"),
+      textureLoader.loadAsync("./assets/pcb-back.png")
+    ]);
+
+    await nextFrame();
+    await nextFrame();
 
     configureScreenLens(gltf.scene);
 
@@ -645,14 +681,17 @@ async function loadConsole() {
     }
 
     // Add the circuit board in the model's coordinate system.
-    const circuitBoard = await createCircuitBoard();
+    const circuitBoard = createCircuitBoard({
+      front: frontTexture,
+      back: backTexture
+    });
     gltf.scene.add(circuitBoard);
 
     // Fit the membranes before scaling and centering the complete model.
     addButtonMembranes(gltf.scene);
 
     // Install both batteries before measuring the complete model.
-    await addBatteries(gltf.scene);
+    addBatteries(gltf.scene, batteryGltf);
 
     gba.add(gltf.scene);
 
@@ -741,8 +780,21 @@ async function loadConsole() {
     }
 
     updateExplosion();
+    controls.enabled = true;
+    renderer.render(scene, camera);
+    await nextFrame();
+
+    stage.setAttribute("aria-busy", "false");
+    loadingPanel.hidden = true;
+    spreadSlider.disabled = false;
+    hideShellCheckbox.disabled = false;
+    renderRequested = true;
   } catch (error) {
     console.error("Failed to load the GBA model:", error);
+    renderer.setAnimationLoop(null);
+    controls.enabled = false;
+    stage.setAttribute("aria-busy", "false");
+    loadingPanel.hidden = true;
   }
 }
 
@@ -902,7 +954,7 @@ function createChipLabel(width, height, lines) {
   const texture = new THREE.CanvasTexture(canvas);
 
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  texture.anisotropy = maxAnisotropy;
 
   const label = new THREE.Mesh(
     new THREE.PlaneGeometry(labelWidth, labelHeight),
@@ -3052,33 +3104,8 @@ function addButtonMembranes(model) {
 
       keyNames = ["a", "b"];
     } else {
-      // Start/Select footprint, including the left mounting clearance.
-      outline = [
-        [457, 725],
-        [402, 725],
-        [375, 730],
-        [352, 744],
-        [337, 764],
-        [331, 789],
-        [330, 819],
-        [332, 832],
-
-        [345, 838],
-        [350, 849],
-        [347, 861],
-        [337, 870],
-
-        [334, 889],
-        [342, 918],
-        [359, 944],
-        [383, 961],
-        [411, 976],
-        [450, 978],
-        [464, 972],
-        [469, 959],
-        [467, 744],
-        [465, 731]
-      ];
+      // Start/Select uses the continuous curve traced below.
+      outline = [];
 
       mountingHoles = [
         [405, 949, 0.045]
@@ -3278,80 +3305,11 @@ function addButtonMembranes(model) {
     return group;
   }
 
-  function createPad(name, outline, mountingHoles, contacts, offset) {
-    // Use the PCB-fitted construction for A/B and Start/Select.
-    if (
-      name === "ab_membrane" ||
-      name === "start_select_membrane"
-    ) {
-      return createPcbFittedPad(name, contacts, offset);
-    }
-
+  function createDpadMembrane(name, outline, mountingHoles, contacts, offset) {
     const group = new THREE.Group();
     group.name = name;
 
-    // Bring the compact membrane closer to the existing buttons.
-    let lift = 0;
-
-    if (name === "ab_membrane") {
-      lift = 0.10;
-    }
-
-    if (name === "start_select_membrane") {
-      lift = 0.22;
-    }
-
-    let points = outline.map(([u, v]) => point(u, v));
-    let referencePoint = null;
-    let referenceScale = 1;
-
-    // Fit the photographed A/B outline to the existing button axes.
-    if (name === "ab_membrane") {
-      const centerA = contacts[0].base;
-      const centerB = contacts[1].base;
-
-      // Reference image: B center (716, 464), A center (950, 464).
-      const axisX = (centerA.x - centerB.x) / 234;
-      const axisY = (centerA.y - centerB.y) / 234;
-
-      referenceScale = Math.hypot(axisX, axisY);
-
-      referencePoint = function (u, v) {
-        const x = u - 716;
-        const y = 464 - v;
-
-        return new THREE.Vector2(
-          centerB.x + x * axisX - y * axisY,
-          centerB.y + x * axisY + y * axisX
-        );
-      };
-
-      points = outline.map(([u, v]) => referencePoint(u, v));
-    }
-
-    // Build Start/Select directly around the two existing key axes.
-    if (name === "start_select_membrane") {
-      const cx = (contacts[0].base.x + contacts[1].base.x) / 2;
-      const upper = Math.max(
-        contacts[0].base.y,
-        contacts[1].base.y
-      );
-      const lower = Math.min(
-        contacts[0].base.y,
-        contacts[1].base.y
-      );
-
-      points = [
-        new THREE.Vector2(cx - 0.27, upper + 0.26),
-        new THREE.Vector2(cx + 0.27, upper + 0.26),
-        new THREE.Vector2(cx + 0.30, upper),
-        new THREE.Vector2(cx + 0.30, lower),
-        new THREE.Vector2(cx + 0.24, lower - 0.26),
-        new THREE.Vector2(cx - 0.24, lower - 0.26),
-        new THREE.Vector2(cx - 0.30, lower),
-        new THREE.Vector2(cx - 0.30, upper)
-      ];
-    }
+    const points = outline.map(([u, v]) => point(u, v));
 
     const shape = new THREE.Shape();
     const last = points[points.length - 1];
@@ -3377,15 +3335,7 @@ function addButtonMembranes(model) {
 
     // Keep the mounting holes tied to the PCB reference.
     for (const [u, v, radius] of mountingHoles) {
-      if (referencePoint) {
-        hole(
-          shape,
-          referencePoint(u, v),
-          radius * referenceScale
-        );
-      } else {
-        hole(shape, point(u, v), radius);
-      }
+      hole(shape, point(u, v), radius);
     }
 
     const plateGeometry = new THREE.ExtrudeGeometry(shape, {
@@ -3400,14 +3350,13 @@ function addButtonMembranes(model) {
     // Match the raised border used on the other membranes.
     addMembraneRim(group, shape, 0.127);
 
+    const contactTop = button("dpad").bottom + 0.001;
+
     for (const contact of contacts) {
       const r = contact.radius;
 
       // Keep the support seated on the PCB.
       const plateTop = 0.127;
-
-      // Extend the rubber reliefs to the underside of the D-pad.
-      const contactTop = button("dpad").bottom + 0.001;
 
       const profile = [
         [0, plateTop - 0.003],
@@ -3442,17 +3391,6 @@ function addButtonMembranes(model) {
         carbon
       );
 
-      // Short straight neck, concentric with the existing rubber key.
-      if (name === "start_select_membrane") {
-        cylinder(
-          group,
-          contact.base,
-          0.145,
-          0.185,
-          contact.height - lift,
-          silicone
-        );
-      }
     }
 
     // Raised collar around the D-pad pivot opening.
@@ -3478,13 +3416,6 @@ function addButtonMembranes(model) {
       group.add(collar);
     }
 
-    // Shift the generated parts before attaching the original keys.
-    group.traverse((child) => {
-      if (child.isMesh) {
-        child.position.z += lift;
-      }
-    });
-
     model.add(group);
 
     movableParts.push({
@@ -3496,8 +3427,6 @@ function addButtonMembranes(model) {
     return group;
   }
 
-  const a = button("a");
-  const b = button("b");
   const start = button("start_key");
   const select = button("select_key");
 
@@ -3551,7 +3480,7 @@ function addButtonMembranes(model) {
   dpadContacts[2].base.x += dpadContactSpread + 0.02;
   dpadContacts[3].base.y -= dpadContactSpread + 0.05;
 
-  createPad(
+  createDpadMembrane(
     "dpad_membrane",
     [
       [264, 324],
@@ -3599,83 +3528,13 @@ function addButtonMembranes(model) {
   );
 
   // A/B axes come from the buttons; the perimeter accommodates the PCB.
-  createPad(
+  createPcbFittedPad(
     "ab_membrane",
     [
-      // Left edge and lower-left locating tab.
-      [590, 530],
-      [608, 507],
-      [599, 478],
-      [605, 438],
-      [624, 405],
-      [649, 380],
-
-      // Upper-left shoulder.
-      [650, 349],
-      [660, 334],
-      [745, 325],
-
-      // Large mounting-hole surround.
-      [781, 312],
-      [806, 310],
-      [831, 320],
-      [844, 345],
-      [861, 354],
-
-      // Upper notch between the two right-hand shoulders.
-      [904, 331],
-      [927, 326],
-      [940, 335],
-      [944, 349],
-      [959, 360],
-      [974, 352],
-      [989, 336],
-      [1007, 338],
-
-      // Upper-right locating tab.
-      [1037, 366],
-      [1064, 397],
-      [1074, 409],
-      [1070, 425],
-      [1054, 439],
-
-      // Rounded right side.
-      [1062, 470],
-      [1050, 509],
-      [1030, 540],
-      [1000, 562],
-      [969, 577],
-
-      // Lower-right shoulder.
-      [956, 600],
-      [944, 611],
-      [898, 598],
-      [850, 583],
-      [822, 580],
-
-      // Lower bridge and left notch.
-      [778, 596],
-      [734, 609],
-      [713, 611],
-      [699, 590],
-      [685, 579],
-      [671, 588],
-      [657, 594],
-      [642, 585],
-      [613, 556]
-    ],
-    [
-      // Hole coordinates and radii in the reference image.
-      [808, 352, 27],
-      [830, 548, 11]
-    ],
-    [
       {
-        base: new THREE.Vector2(a.center.x, a.center.y),
         radius: 0.29
       },
       {
-        base: new THREE.Vector2(b.center.x, b.center.y),
         radius: 0.29
       }
     ],
@@ -3683,20 +3542,14 @@ function addButtonMembranes(model) {
   );
 
   // One coherent Start/Select part, centered on the shell openings.
-  const startSelect = createPad(
+  const startSelect = createPcbFittedPad(
     "start_select_membrane",
-    [],
-    [],
     [
       {
-        base: new THREE.Vector2(start.center.x, start.center.y),
-        radius: 0.22,
-        height: start.bottom + 0.005
+        radius: 0.22
       },
       {
-        base: new THREE.Vector2(select.center.x, select.center.y),
-        radius: 0.22,
-        height: select.bottom + 0.005
+        radius: 0.22
       }
     ],
     new THREE.Vector3(-1.15, -0.7, 3.2)
@@ -3717,7 +3570,7 @@ function addButtonMembranes(model) {
 }
 
 // Build the textured circuit board and its main chips.
-async function createCircuitBoard() {
+function createCircuitBoard(textures) {
   const board = new THREE.Group();
   board.name = "pcb";
   board.position.z = -0.02;
@@ -3856,19 +3709,16 @@ async function createCircuitBoard() {
 
   board.add(substrate);
 
-  // Load and align the front and back textures.
-  const textureLoader = new THREE.TextureLoader();
+  // Align the already loaded front and back textures.
 
   const imageWidth = 2000;
   const imageHeight = 1163;
 
   for (const face of ["front", "back"]) {
-    const texture = await textureLoader.loadAsync(
-      `./assets/pcb-${face}.png`
-    );
+    const texture = textures[face];
 
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    texture.anisotropy = maxAnisotropy;
 
     // Reuse the outline and its holes for each flat surface.
     const faceGeometry = new THREE.ShapeGeometry(shape, 16);
@@ -4560,10 +4410,10 @@ async function createCircuitBoard() {
   return board;
 }
 
-loadConsole();
 
 // Keep the scene proportional when resizing.
 function resizeScene() {
+  renderRequested = true;
   const width = window.innerWidth;
   const height = window.innerHeight;
 
@@ -4590,9 +4440,16 @@ function animate() {
 
   previousTime = currentTime;
 
-  animateExplosion(deltaTime);
+  const partsMoved = animateExplosion(deltaTime);
   controls.update();
-  renderer.render(scene, camera);
+
+  // Keep damping responsive, but avoid drawing an unchanged scene.
+  if (partsMoved || renderRequested) {
+    renderer.render(scene, camera);
+    renderRequested = false;
+  }
 }
 
 renderer.setAnimationLoop(animate);
+
+loadConsole();
